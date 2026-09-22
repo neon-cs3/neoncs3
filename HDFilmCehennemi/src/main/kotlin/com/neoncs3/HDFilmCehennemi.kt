@@ -30,7 +30,7 @@ class HDFilmCehennemi : MainAPI() {
         "${mainUrl}/tur/belgesel-filmlerini-izle-2"        to "Belgesel Filmleri",
         "${mainUrl}/tur/bilim-kurgu-filmlerini-izleyin-5" to "Bilim Kurgu Filmleri",
         "${mainUrl}/tur/komedi-filmlerini-izleyin-2"       to "Komedi Filmleri",
-        "${mainUrl}/tur/korku-filmlerini-izle-9/"         to "Korku Filmleri",
+        "${mainUrl}/tur/korku-filmenini-izle-9/"          to "Korku Filmleri",
         "${mainUrl}/tur/romantik-filmleri-izle-3"          to "Romantik Filmleri"
     )
 
@@ -41,8 +41,8 @@ class HDFilmCehennemi : MainAPI() {
     }
 
     private fun Element.toSearchResult(): SearchResponse? {
-        val title   = this.selectFirst("strong.poster-title")?.text() ?: return null
-        val href    = fixUrlNull(this.attr("href")) ?: return null
+        val title     = this.selectFirst("strong.poster-title")?.text() ?: return null
+        val href      = fixUrlNull(this.attr("href")) ?: return null
         val posterUrl = fixUrlNull(this.selectFirst("img")?.attr("data-src"))
 
         return newMovieSearchResponse(title, href, TvType.Movie) { this.posterUrl = posterUrl }
@@ -60,8 +60,8 @@ class HDFilmCehennemi : MainAPI() {
         response.results.forEach { resultHtml ->
             val document = Jsoup.parse(resultHtml)
 
-            val title   = document.selectFirst("h4.title")?.text() ?: return@forEach
-            val href    = fixUrlNull(document.selectFirst("a")?.attr("href")) ?: return@forEach
+            val title     = document.selectFirst("h4.title")?.text() ?: return@forEach
+            val href      = fixUrlNull(document.selectFirst("a")?.attr("href")) ?: return@forEach
             val posterUrl = fixUrlNull(document.selectFirst("img")?.attr("src")) ?: fixUrlNull(document.selectFirst("img")?.attr("data-src"))
 
             searchResults.add(
@@ -137,7 +137,7 @@ class HDFilmCehennemi : MainAPI() {
         }
     }
 
-   override suspend fun loadLinks(
+    override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
         subtitleCallback: (SubtitleFile) -> Unit,
@@ -149,12 +149,10 @@ class HDFilmCehennemi : MainAPI() {
             val langCode = element.attr("data-lang").uppercase()
 
             element.select("button.alternative-link").forEach { button ->
-                val sourceName = button.text().replace(Regex("\\(.*?\\)"), "").trim() + " [$langCode]"
                 val videoID = button.attr("data-video")
                 if (videoID.isBlank()) return@forEach
 
                 try {
-                    // Sitenin video API'sine bağlanıp JSON veya HTML yanıtını alıyoruz
                     val res = app.get(
                         "$mainUrl/video/$videoID/",
                         headers = mapOf(
@@ -164,7 +162,6 @@ class HDFilmCehennemi : MainAPI() {
                         )
                     ).text
 
-                    // JSON veya string içindeki iframe / video adresini ayıklama
                     val cleanJson = res.replace("\\\"", "\"").replace("\\/", "/")
                     val iframeSrc = Regex("src=\"(https?://[^\"]+)\"").find(cleanJson)?.groupValues?.get(1)
                         ?: Regex("data-src=\"(https?://[^\"]+)\"").find(cleanJson)?.groupValues?.get(1)
@@ -172,7 +169,6 @@ class HDFilmCehennemi : MainAPI() {
 
                     if (iframeSrc.isNotBlank()) {
                         val finalIframe = fixUrl(iframeSrc)
-                        // CloudStream extractor havuzu ile oynatılabilir linki çözüyoruz
                         loadExtractor(finalIframe, "$mainUrl/", subtitleCallback, callback)
                     }
                 } catch (e: Exception) {
@@ -181,7 +177,6 @@ class HDFilmCehennemi : MainAPI() {
             }
         }
 
-        // Alternatif olarak doğrudan sayfadaki video etiketlerini de tarayalım
         document.select("iframe.embed-player, iframe#player-iframe").forEach { iframe ->
             val src = iframe.attr("data-src").ifBlank { iframe.attr("src") }
             if (src.isNotBlank()) {
@@ -191,3 +186,8 @@ class HDFilmCehennemi : MainAPI() {
 
         return true
     }
+}
+
+data class Results(
+    @JsonProperty("results") val results: List<String> = arrayListOf()
+)

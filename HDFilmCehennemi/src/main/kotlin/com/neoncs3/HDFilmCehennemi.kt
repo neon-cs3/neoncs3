@@ -10,41 +10,39 @@ import org.jsoup.Jsoup
 import org.jsoup.nodes.Element
 
 class HDFilmCehennemi : MainAPI() {
-    override var mainUrl               = "https://www.hdfilmcehennemi.nl"
-    override var name                  = "HDFilmCehennemi"
-    override val hasMainPage           = true
-    override var lang                  = "tr"
-    override val hasQuickSearch        = true
-    override val supportedTypes        = setOf(TvType.Movie, TvType.TvSeries)
+    override var mainUrl                = "https://www.hdfilmcehennemi.nl"
+    override var name                   = "HDFilmCehennemi"
+    override val hasMainPage            = true
+    override var lang                   = "tr"
+    override val hasQuickSearch         = true
+    override val supportedTypes         = setOf(TvType.Movie, TvType.TvSeries)
 
     override val mainPage = mainPageOf(
         mainUrl to "Yeni Eklenen Filmler",
-        "${mainUrl}/yabancidiziizle-5"                    to "Yeni Eklenen Diziler",
-        "${mainUrl}/category/tavsiye-filmler-izle3"       to "Tavsiye Filmler",
+        "${mainUrl}/yabancidiziizle-5"                        to "Yeni Eklenen Diziler",
+        "${mainUrl}/category/tavsiye-filmler-izle3"        to "Tavsiye Filmler",
         "${mainUrl}/imdb-7-puan-uzeri-filmle-2r"          to "IMDB 7+ Filmler",
         "${mainUrl}/en-cok-yorumlananlar-2"                to "En Çok Yorumlananlar",
-        "${mainUrl}/en-cok-begenilen-filmleri-izle-4"     to "En Çok Beğenilenler",
+        "${mainUrl}/en-cok-begenilen-filmleri-izle-4"      to "En Çok Beğenilenler",
         "${mainUrl}/tur/aile-filmleri-izleyin-7"          to "Aile Filmleri",
         "${mainUrl}/tur/aksiyon-filmleri-izleyin-8"        to "Aksiyon Filmleri",
         "${mainUrl}/tur/animasyon-filmlerini-izleyin-5"   to "Animasyon Filmleri",
-        "${mainUrl}/tur/belgesel-filmlerini-izle-2"       to "Belgesel Filmleri",
+        "${mainUrl}/tur/belgesel-filmlerini-izle-2"        to "Belgesel Filmleri",
         "${mainUrl}/tur/bilim-kurgu-filmlerini-izleyin-5" to "Bilim Kurgu Filmleri",
-        "${mainUrl}/tur/komedi-filmlerini-izleyin-2"      to "Komedi Filmleri",
+        "${mainUrl}/tur/komedi-filmlerini-izleyin-2"       to "Komedi Filmleri",
         "${mainUrl}/tur/korku-filmlerini-izle-9/"         to "Korku Filmleri",
-        "${mainUrl}/tur/romantik-filmleri-izle-3"         to "Romantik Filmleri"
+        "${mainUrl}/tur/romantik-filmleri-izle-3"          to "Romantik Filmleri"
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val document = app.get(request.data).document
-
         val home: List<SearchResponse> = document.select("div.section-content a.poster").mapNotNull { it.toSearchResult() }
-
         return newHomePageResponse(request.name, home)
     }
 
     private fun Element.toSearchResult(): SearchResponse? {
-        val title     = this.selectFirst("strong.poster-title")?.text() ?: return null
-        val href      = fixUrlNull(this.attr("href")) ?: return null
+        val title   = this.selectFirst("strong.poster-title")?.text() ?: return null
+        val href    = fixUrlNull(this.attr("href")) ?: return null
         val posterUrl = fixUrlNull(this.selectFirst("img")?.attr("data-src"))
 
         return newMovieSearchResponse(title, href, TvType.Movie) { this.posterUrl = posterUrl }
@@ -62,8 +60,8 @@ class HDFilmCehennemi : MainAPI() {
         response.results.forEach { resultHtml ->
             val document = Jsoup.parse(resultHtml)
 
-            val title     = document.selectFirst("h4.title")?.text() ?: return@forEach
-            val href      = fixUrlNull(document.selectFirst("a")?.attr("href")) ?: return@forEach
+            val title   = document.selectFirst("h4.title")?.text() ?: return@forEach
+            val href    = fixUrlNull(document.selectFirst("a")?.attr("href")) ?: return@forEach
             val posterUrl = fixUrlNull(document.selectFirst("img")?.attr("src")) ?: fixUrlNull(document.selectFirst("img")?.attr("data-src"))
 
             searchResults.add(
@@ -139,35 +137,6 @@ class HDFilmCehennemi : MainAPI() {
         }
     }
 
-    private suspend fun invokeLocalSource(
-        source: String,
-        url: String,
-        subtitleCallback: (SubtitleFile) -> Unit,
-        callback: (ExtractorLink) -> Unit
-    ) {
-        val script    = app.get(url, referer = "${mainUrl}/").document.select("script").find { it.data().contains("sources:") }?.data() ?: return
-        val videoData = getAndUnpack(script).substringAfter("file_link=\"").substringBefore("\";")
-        val subData   = script.substringAfter("tracks: [").substringBefore("]")
-
-        callback.invoke(
-            newExtractorLink(
-                source  = source,
-                name    = source,
-                url     = base64Decode(videoData),
-                type    = INFER_TYPE
-            ) {
-                this.referer = "${mainUrl}/"
-                this.quality = Qualities.Unknown.value
-            }
-        )
-
-        AppUtils.tryParseJson<List<SubSource>>("[${subData}]")?.filter { it.kind == "captions" }?.forEach { sub ->
-            subtitleCallback.invoke(
-                SubtitleFile(sub.label ?: "", fixUrl(sub.file ?: ""))
-            )
-        }
-    }
-
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -177,52 +146,44 @@ class HDFilmCehennemi : MainAPI() {
         Log.d("HDCH", "data » $data")
         val document = app.get(data).document
 
-        for (element in document.select("div.alternative-links")) {
+        document.select("div.alternative-links").forEach { element ->
             val langCode = element.attr("data-lang").uppercase()
 
-            for (button in element.select("button.alternative-link")) {
-                val source = button.text().replace("(HDrip Xbet)", "").trim() + " $langCode"
+            element.select("button.alternative-link").forEach { button ->
+                val source = button.text().replace(Regex("\\(.*?\\)"), "").trim() + " $langCode"
                 val videoID = button.attr("data-video")
-                if (videoID.isBlank()) continue
+                if (videoID.isBlank()) return@forEach
 
                 val apiGet = app.get(
                     "${mainUrl}/video/$videoID/",
                     headers = mapOf(
-                        "Content-Type"     to "application/json",
-                        "X-Requested-With" to "fetch"
-                    ),
-                    referer = data
+                        "X-Requested-With" to "fetch",
+                        "Referer" to data,
+                        "User-Agent" to USER_AGENT
+                    )
                 ).text
 
-                // Sunucudan gelen JSON/HTML içindeki kaçış tırnaklarını temizle
-val cleanHtml = apiGet.replace("\\\"", "\"")
+                val cleanHtml = apiGet.replace("\\\"", "\"").replace("\\/", "/")
+                val iframeTag = Jsoup.parse(cleanHtml).selectFirst("iframe")
+                val rawIframe = iframeTag?.attr("data-src")?.takeIf { it.isNotBlank() }
+                    ?: iframeTag?.attr("src")?.takeIf { it.isNotBlank() }
+                    ?: return@forEach
 
-// Jsoup ile iframe etiketini bul ve data-src (yoksa src) değerini güvenle al
-val iframeTag = Jsoup.parse(cleanHtml).selectFirst("iframe")
-val rawIframe = iframeTag?.attr("data-src")?.takeIf { it.isNotBlank() } 
-    ?: iframeTag?.attr("src")?.takeIf { it.isNotBlank() } 
-    ?: continue
+                var iframe = fixUrl(rawIframe)
+                if (iframe.contains("rapidrame_id=")) {
+                    val rapidId = iframe.substringAfter("rapidrame_id=").substringBefore("&")
+                    iframe = "$mainUrl/playerr/$rapidId"
+                }
 
-var iframe = rawIframe
-if (iframe.contains("?rapidrame_id=")) {
-    iframe = "${mainUrl}/playerr/" + iframe.substringAfter("?rapidrame_id=")
-}
-
-                Log.d("HDCH", "$source » $videoID » $iframe")
-                invokeLocalSource(source, iframe, subtitleCallback, callback)
+                Log.d("HDCH", "$source » Video ID: $videoID » Iframe: $iframe")
+                loadExtractor(iframe, "$mainUrl/", subtitleCallback, callback)
             }
         }
 
         return true
     }
-
-    private data class SubSource(
-        @JsonProperty("file")  val file: String?  = null,
-        @JsonProperty("label") val label: String? = null,
-        @JsonProperty("kind")  val kind: String?  = null
-    )
-
-    data class Results(
-        @JsonProperty("results") val results: List<String> = arrayListOf()
-    )
 }
+
+data class Results(
+    @JsonProperty("results") val results: List<String> = arrayListOf()
+)

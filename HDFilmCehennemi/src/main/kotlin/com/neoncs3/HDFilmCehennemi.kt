@@ -10,12 +10,12 @@ import org.jsoup.Jsoup
 import org.jsoup.nodes.Element
 
 class HDFilmCehennemi : MainAPI() {
-    override var mainUrl                = "https://www.hdfilmcehennemi.nl"
-    override var name                   = "HDFilmCehennemi"
-    override val hasMainPage            = true
-    override var lang                   = "tr"
-    override val hasQuickSearch         = true
-    override val supportedTypes         = setOf(TvType.Movie, TvType.TvSeries)
+    override var mainUrl                    = "https://www.hdfilmcehennemi.nl"
+    override var name                       = "HDFilmCehennemi"
+    override val hasMainPage              = true
+    override var lang                       = "tr"
+    override val hasQuickSearch           = true
+    override val supportedTypes           = setOf(TvType.Movie, TvType.TvSeries)
 
     override val mainPage = mainPageOf(
         mainUrl to "Yeni Eklenen Filmler",
@@ -41,8 +41,8 @@ class HDFilmCehennemi : MainAPI() {
     }
 
     private fun Element.toSearchResult(): SearchResponse? {
-        val title     = this.selectFirst("strong.poster-title")?.text() ?: return null
-        val href      = fixUrlNull(this.attr("href")) ?: return null
+        val title   = this.selectFirst("strong.poster-title")?.text() ?: return null
+        val href    = fixUrlNull(this.attr("href")) ?: return null
         val posterUrl = fixUrlNull(this.selectFirst("img")?.attr("data-src"))
 
         return newMovieSearchResponse(title, href, TvType.Movie) { this.posterUrl = posterUrl }
@@ -60,8 +60,8 @@ class HDFilmCehennemi : MainAPI() {
         response.results.forEach { resultHtml ->
             val document = Jsoup.parse(resultHtml)
 
-            val title     = document.selectFirst("h4.title")?.text() ?: return@forEach
-            val href      = fixUrlNull(document.selectFirst("a")?.attr("href")) ?: return@forEach
+            val title   = document.selectFirst("h4.title")?.text() ?: return@forEach
+            val href    = fixUrlNull(document.selectFirst("a")?.attr("href")) ?: return@forEach
             val posterUrl = fixUrlNull(document.selectFirst("img")?.attr("src")) ?: fixUrlNull(document.selectFirst("img")?.attr("data-src"))
 
             searchResults.add(
@@ -180,16 +180,16 @@ class HDFilmCehennemi : MainAPI() {
                             referer = "$mainUrl/",
                             subtitleCallback = subtitleCallback,
                             callback = { link ->
-                                @Suppress("DEPRECATION")
-                                val customLink = ExtractorLink(
+                                val customLink = newExtractorLink(
                                     source = sourceName,
                                     name = sourceName,
                                     url = link.url,
                                     referer = link.referer,
-                                    quality = link.quality,
-                                    isM3u8 = link.isM3u8,
-                                    headers = link.headers
-                                )
+                                    quality = link.quality
+                                ) {
+                                    this.isM3u8 = link.isM3u8
+                                    this.headers = link.headers
+                                }
                                 callback.invoke(customLink)
                             }
                         )

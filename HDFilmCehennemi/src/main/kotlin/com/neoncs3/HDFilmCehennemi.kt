@@ -145,13 +145,13 @@ class HDFilmCehennemi : MainAPI() {
     ): Boolean {
         val document = app.get(data).document
 
-        document.select("div.alternative-links").forEach { element ->
+        for (element in document.select("div.alternative-links")) {
             val langCode = element.attr("data-lang").uppercase()
 
-            element.select("button.alternative-link").forEach { button ->
+            for (button in element.select("button.alternative-link")) {
                 val sourceName = button.text().replace(Regex("\\(.*?\\)"), "").trim() + " [$langCode]"
                 val videoID = button.attr("data-video")
-                if (videoID.isBlank()) return@forEach
+                if (videoID.isBlank()) continue
 
                 try {
                     val res = app.get(
@@ -181,12 +181,12 @@ class HDFilmCehennemi : MainAPI() {
                             subtitleCallback = subtitleCallback,
                             callback = { link ->
                                 val customLink = newExtractorLink(
-                                    source = sourceName,
-                                    name = sourceName,
-                                    url = link.url,
-                                    referer = link.referer,
-                                    quality = link.quality
+                                    sourceName,
+                                    sourceName,
+                                    link.url,
+                                    link.quality
                                 ) {
+                                    this.referer = link.referer
                                     this.isM3u8 = link.isM3u8
                                     this.headers = link.headers
                                 }

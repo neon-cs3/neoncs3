@@ -175,20 +175,14 @@ class HDFilmCehennemi : MainAPI() {
                             finalIframe = "$mainUrl/playerr/$rapidId"
                         }
 
+                        // Extractor üzerinden gelen linki buton ismiyle güncelleyip doğrudan iletiyoruz
                         loadExtractor(
                             url = finalIframe,
                             referer = "$mainUrl/",
                             subtitleCallback = subtitleCallback,
                             callback = { link ->
                                 callback.invoke(
-                                    newExtractorLink(
-                                        source = sourceName,
-                                        name = sourceName,
-                                        url = link.url,
-                                        referer = link.referer,
-                                        quality = link.quality,
-                                        isM3u8 = link.isM3u8
-                                    )
+                                    link.copy(source = sourceName, name = sourceName)
                                 )
                             }
                         )

@@ -47,11 +47,11 @@ subprojects {
 
     cloudstream {
         setRepo(System.getenv("GITHUB_REPOSITORY") ?: "https://github.com/Kayracs3/Kayra")
-        authors = listOf("Kayracs3")
+        authors = listOf("neon-cs3")
     }
 
     android {
-        namespace = "com.Kayracs3"
+        namespace = "com.neon-cs3"
 
         defaultConfig {
             minSdk = 21

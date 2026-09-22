@@ -1,4 +1,4 @@
-package com.Kayracs3
+package com.neon-cs3
 
 import android.util.Log
 import com.fasterxml.jackson.annotation.JsonProperty

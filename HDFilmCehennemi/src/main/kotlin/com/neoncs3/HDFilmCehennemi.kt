@@ -181,14 +181,13 @@ class HDFilmCehennemi : MainAPI() {
                             subtitleCallback = subtitleCallback,
                             callback = { link ->
                                 callback.invoke(
-                                    ExtractorLink(
+                                    newExtractorLink(
                                         source = sourceName,
                                         name = sourceName,
                                         url = link.url,
                                         referer = link.referer,
                                         quality = link.quality,
-                                        isM3u8 = link.isM3u8,
-                                        headers = link.headers
+                                        isM3u8 = link.isM3u8
                                     )
                                 )
                             }

@@ -1,4 +1,4 @@
-package com.neon-cs3
+package com.neon_cs3
 
 import com.lagradost.cloudstream3.plugins.CloudstreamPlugin
 import com.lagradost.cloudstream3.plugins.Plugin

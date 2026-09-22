@@ -166,7 +166,7 @@ class HDFilmCehennemi : MainAPI() {
         }
     }
 
-    override suspend fun loadLinks(
+   override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
         subtitleCallback: (SubtitleFile) -> Unit,
@@ -183,6 +183,7 @@ class HDFilmCehennemi : MainAPI() {
                 val videoID = button.attr("data-video")
                 if (videoID.isBlank()) return@forEach
 
+                // Video ID ile AJAX isteği atıp iframe kaynağını alıyoruz
                 val apiGet = app.get(
                     "${mainUrl}/video/$videoID/",
                     headers = mapOf(
@@ -204,22 +205,12 @@ class HDFilmCehennemi : MainAPI() {
                     iframe = "$mainUrl/playerr/$rapidId"
                 }
 
-                Log.d("HDCH", "$source » $videoID » $iframe")
-                
-                invokeLocalSource(source, iframe, subtitleCallback, callback)
+                Log.d("HDCH", "$source » Video ID: $videoID » Iframe: $iframe")
+
+                // CloudStream'in güçlü yerleşik extractor'ı ile videoları otomatik çözüyoruz
+                loadExtractor(iframe, "$mainUrl/", subtitleCallback, callback)
             }
         }
 
         return true
     }
-
-    private data class SubSource(
-        @JsonProperty("file")  val file: String?  = null,
-        @JsonProperty("label") val label: String? = null,
-        @JsonProperty("kind")  val kind: String?  = null
-    )
-
-    data class Results(
-        @JsonProperty("results") val results: List<String> = arrayListOf()
-    )
-}

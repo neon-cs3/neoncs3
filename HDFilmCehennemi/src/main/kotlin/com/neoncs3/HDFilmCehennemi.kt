@@ -137,7 +137,7 @@ class HDFilmCehennemi : MainAPI() {
         }
     }
 
-   override suspend fun loadLinks(
+    override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
         subtitleCallback: (SubtitleFile) -> Unit,
@@ -154,7 +154,6 @@ class HDFilmCehennemi : MainAPI() {
                 if (videoID.isBlank()) return@forEach
 
                 try {
-                    // 1. Sitenin video AJAX endpoint'ine bağlanıyoruz
                     val res = app.get(
                         "$mainUrl/video/$videoID/",
                         headers = mapOf(
@@ -171,24 +170,26 @@ class HDFilmCehennemi : MainAPI() {
 
                     if (iframeSrc.isNotBlank()) {
                         var finalIframe = fixUrl(iframeSrc)
-                        
-                        // Rapidrame özel ID'lerini sitenin kendi oynatıcı path'ine çeviriyoruz
                         if (finalIframe.contains("rapidrame_id=")) {
                             val rapidId = finalIframe.substringAfter("rapidrame_id=").substringBefore("&")
                             finalIframe = "$mainUrl/playerr/$rapidId"
                         }
 
-                        Log.d("HDFilmCehennemi", "Oynatıcı Yönlendirmesi: $finalIframe")
-
-                        // 2. CloudStream'in yerleşik extractor mekanizması ile oynatıcıyı çözüyoruz
                         loadExtractor(
                             url = finalIframe,
                             referer = "$mainUrl/",
                             subtitleCallback = subtitleCallback,
                             callback = { link ->
-                                // Kaynak adını buton ismiyle özelleştiriyoruz
                                 callback.invoke(
-                                    link.copy(source = sourceName, name = sourceName)
+                                    ExtractorLink(
+                                        source = sourceName,
+                                        name = sourceName,
+                                        url = link.url,
+                                        referer = link.referer,
+                                        quality = link.quality,
+                                        isM3u8 = link.isM3u8,
+                                        headers = link.headers
+                                    )
                                 )
                             }
                         )
@@ -201,3 +202,8 @@ class HDFilmCehennemi : MainAPI() {
 
         return true
     }
+}
+
+data class Results(
+    @JsonProperty("results") val results: List<String> = arrayListOf()
+)

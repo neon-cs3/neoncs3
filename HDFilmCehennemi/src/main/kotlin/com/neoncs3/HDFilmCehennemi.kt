@@ -137,53 +137,57 @@ class HDFilmCehennemi : MainAPI() {
         }
     }
 
-    override suspend fun loadLinks(
+   override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        Log.d("HDCH", "data » $data")
         val document = app.get(data).document
 
         document.select("div.alternative-links").forEach { element ->
             val langCode = element.attr("data-lang").uppercase()
 
             element.select("button.alternative-link").forEach { button ->
-                val source = button.text().replace(Regex("\\(.*?\\)"), "").trim() + " $langCode"
+                val sourceName = button.text().replace(Regex("\\(.*?\\)"), "").trim() + " [$langCode]"
                 val videoID = button.attr("data-video")
                 if (videoID.isBlank()) return@forEach
 
-                val apiGet = app.get(
-                    "${mainUrl}/video/$videoID/",
-                    headers = mapOf(
-                        "X-Requested-With" to "fetch",
-                        "Referer" to data,
-                        "User-Agent" to USER_AGENT
-                    )
-                ).text
+                try {
+                    // Sitenin video API'sine bağlanıp JSON veya HTML yanıtını alıyoruz
+                    val res = app.get(
+                        "$mainUrl/video/$videoID/",
+                        headers = mapOf(
+                            "X-Requested-With" to "fetch",
+                            "Referer" to data,
+                            "User-Agent" to USER_AGENT
+                        )
+                    ).text
 
-                val cleanHtml = apiGet.replace("\\\"", "\"").replace("\\/", "/")
-                val iframeTag = Jsoup.parse(cleanHtml).selectFirst("iframe")
-                val rawIframe = iframeTag?.attr("data-src")?.takeIf { it.isNotBlank() }
-                    ?: iframeTag?.attr("src")?.takeIf { it.isNotBlank() }
-                    ?: return@forEach
+                    // JSON veya string içindeki iframe / video adresini ayıklama
+                    val cleanJson = res.replace("\\\"", "\"").replace("\\/", "/")
+                    val iframeSrc = Regex("src=\"(https?://[^\"]+)\"").find(cleanJson)?.groupValues?.get(1)
+                        ?: Regex("data-src=\"(https?://[^\"]+)\"").find(cleanJson)?.groupValues?.get(1)
+                        ?: cleanJson.substringAfter("iframe src=\"").substringBefore("\"")
 
-                var iframe = fixUrl(rawIframe)
-                if (iframe.contains("rapidrame_id=")) {
-                    val rapidId = iframe.substringAfter("rapidrame_id=").substringBefore("&")
-                    iframe = "$mainUrl/playerr/$rapidId"
+                    if (iframeSrc.isNotBlank()) {
+                        val finalIframe = fixUrl(iframeSrc)
+                        // CloudStream extractor havuzu ile oynatılabilir linki çözüyoruz
+                        loadExtractor(finalIframe, "$mainUrl/", subtitleCallback, callback)
+                    }
+                } catch (e: Exception) {
+                    Log.e("HDFilmCehennemi", "Link yükleme hatası: ${e.message}")
                 }
+            }
+        }
 
-                Log.d("HDCH", "$source » Video ID: $videoID » Iframe: $iframe")
-                loadExtractor(iframe, "$mainUrl/", subtitleCallback, callback)
+        // Alternatif olarak doğrudan sayfadaki video etiketlerini de tarayalım
+        document.select("iframe.embed-player, iframe#player-iframe").forEach { iframe ->
+            val src = iframe.attr("data-src").ifBlank { iframe.attr("src") }
+            if (src.isNotBlank()) {
+                loadExtractor(fixUrl(src), "$mainUrl/", subtitleCallback, callback)
             }
         }
 
         return true
     }
-}
-
-data class Results(
-    @JsonProperty("results") val results: List<String> = arrayListOf()
-)

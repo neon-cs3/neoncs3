@@ -137,7 +137,7 @@ class HDFilmCehennemi : MainAPI() {
         }
     }
 
-    override suspend fun loadLinks(
+   override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
         subtitleCallback: (SubtitleFile) -> Unit,
@@ -149,10 +149,12 @@ class HDFilmCehennemi : MainAPI() {
             val langCode = element.attr("data-lang").uppercase()
 
             element.select("button.alternative-link").forEach { button ->
+                val sourceName = button.text().replace(Regex("\\(.*?\\)"), "").trim() + " [$langCode]"
                 val videoID = button.attr("data-video")
                 if (videoID.isBlank()) return@forEach
 
                 try {
+                    // 1. Sitenin video AJAX endpoint'ine bağlanıyoruz
                     val res = app.get(
                         "$mainUrl/video/$videoID/",
                         headers = mapOf(
@@ -168,8 +170,28 @@ class HDFilmCehennemi : MainAPI() {
                         ?: cleanJson.substringAfter("iframe src=\"").substringBefore("\"")
 
                     if (iframeSrc.isNotBlank()) {
-                        val finalIframe = fixUrl(iframeSrc)
-                        loadExtractor(finalIframe, "$mainUrl/", subtitleCallback, callback)
+                        var finalIframe = fixUrl(iframeSrc)
+                        
+                        // Rapidrame özel ID'lerini sitenin kendi oynatıcı path'ine çeviriyoruz
+                        if (finalIframe.contains("rapidrame_id=")) {
+                            val rapidId = finalIframe.substringAfter("rapidrame_id=").substringBefore("&")
+                            finalIframe = "$mainUrl/playerr/$rapidId"
+                        }
+
+                        Log.d("HDFilmCehennemi", "Oynatıcı Yönlendirmesi: $finalIframe")
+
+                        // 2. CloudStream'in yerleşik extractor mekanizması ile oynatıcıyı çözüyoruz
+                        loadExtractor(
+                            url = finalIframe,
+                            referer = "$mainUrl/",
+                            subtitleCallback = subtitleCallback,
+                            callback = { link ->
+                                // Kaynak adını buton ismiyle özelleştiriyoruz
+                                callback.invoke(
+                                    link.copy(source = sourceName, name = sourceName)
+                                )
+                            }
+                        )
                     }
                 } catch (e: Exception) {
                     Log.e("HDFilmCehennemi", "Link yükleme hatası: ${e.message}")
@@ -177,17 +199,5 @@ class HDFilmCehennemi : MainAPI() {
             }
         }
 
-        document.select("iframe.embed-player, iframe#player-iframe").forEach { iframe ->
-            val src = iframe.attr("data-src").ifBlank { iframe.attr("src") }
-            if (src.isNotBlank()) {
-                loadExtractor(fixUrl(src), "$mainUrl/", subtitleCallback, callback)
-            }
-        }
-
         return true
     }
-}
-
-data class Results(
-    @JsonProperty("results") val results: List<String> = arrayListOf()
-)

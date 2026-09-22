@@ -168,7 +168,7 @@ class HDFilmCehennemi : MainAPI() {
         }
     }
 
-    override suspend fun loadLinks(
+   override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
         subtitleCallback: (SubtitleFile) -> Unit,
@@ -177,52 +177,45 @@ class HDFilmCehennemi : MainAPI() {
         Log.d("HDCH", "data » $data")
         val document = app.get(data).document
 
-        for (element in document.select("div.alternative-links")) {
+        document.select("div.alternative-links").forEach { element ->
             val langCode = element.attr("data-lang").uppercase()
 
-            for (button in element.select("button.alternative-link")) {
-                val source = button.text().replace("(HDrip Xbet)", "").trim() + " $langCode"
+            element.select("button.alternative-link").forEach { button ->
+                val source = button.text().replace(Regex("\\(.*?\\)"), "").trim() + " $langCode"
                 val videoID = button.attr("data-video")
-                if (videoID.isBlank()) continue
+                if (videoID.isBlank()) return@forEach
 
+                // Güncellenmiş AJAX video endpoint isteği
                 val apiGet = app.get(
                     "${mainUrl}/video/$videoID/",
                     headers = mapOf(
-                        "Content-Type"     to "application/json",
-                        "X-Requested-With" to "fetch"
-                    ),
-                    referer = data
+                        "X-Requested-With" to "fetch",
+                        "Referer" to data,
+                        "User-Agent" to USER_AGENT
+                    )
                 ).text
 
-                // Sunucudan gelen JSON/HTML içindeki kaçış tırnaklarını temizle
-val cleanHtml = apiGet.replace("\\\"", "\"")
+                // JSON yanıtından iframe kaynağını güvenli bir şekilde ayıkla
+                val cleanHtml = apiGet.replace("\\\"", "\"").replace("\\/", "/")
+                val iframeTag = Jsoup.parse(cleanHtml).selectFirst("iframe")
+                val rawIframe = iframeTag?.attr("data-src")?.takeIf { it.isNotBlank() }
+                    ?: iframeTag?.attr("src")?.takeIf { it.isNotBlank() }
+                    ?: return@forEach
 
-// Jsoup ile iframe etiketini bul ve data-src (yoksa src) değerini güvenle al
-val iframeTag = Jsoup.parse(cleanHtml).selectFirst("iframe")
-val rawIframe = iframeTag?.attr("data-src")?.takeIf { it.isNotBlank() } 
-    ?: iframeTag?.attr("src")?.takeIf { it.isNotBlank() } 
-    ?: continue
-
-var iframe = rawIframe
-if (iframe.contains("?rapidrame_id=")) {
-    iframe = "${mainUrl}/playerr/" + iframe.substringAfter("?rapidrame_id=")
-}
+                var iframe = fixUrl(rawIframe)
+                if (iframe.contains("rapidrame_id=")) {
+                    val rapidId = iframe.substringAfter("rapidrame_id=").substringBefore("&")
+                    iframe = "$mainUrl/playerr/$rapidId"
+                }
 
                 Log.d("HDCH", "$source » $videoID » $iframe")
-                invokeLocalSource(source, iframe, subtitleCallback, callback)
+                
+                // Oynatıcı linklerini çözme aşaması
+                safeApiCall {
+                    invokeLocalSource(source, iframe, subtitleCallback, callback)
+                }
             }
         }
 
         return true
     }
-
-    private data class SubSource(
-        @JsonProperty("file")  val file: String?  = null,
-        @JsonProperty("label") val label: String? = null,
-        @JsonProperty("kind")  val kind: String?  = null
-    )
-
-    data class Results(
-        @JsonProperty("results") val results: List<String> = arrayListOf()
-    )
-}

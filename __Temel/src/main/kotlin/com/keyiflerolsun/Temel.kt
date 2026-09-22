@@ -1,6 +1,6 @@
 // ! Bu araç @keyiflerolsun tarafından | @KekikAkademi için yazılmıştır.
 
-package com.Kayracs3
+package com.neon-cs3
 
 import android.util.Log
 import org.jsoup.nodes.Element

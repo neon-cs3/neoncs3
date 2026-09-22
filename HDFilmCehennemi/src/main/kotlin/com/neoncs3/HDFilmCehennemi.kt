@@ -8,6 +8,7 @@ import com.lagradost.cloudstream3.LoadResponse.Companion.addTrailer
 import com.lagradost.cloudstream3.utils.*
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Element
+import kotlinx.coroutines.runBlocking
 
 class HDFilmCehennemi : MainAPI() {
     override var mainUrl                    = "https://www.hdfilmcehennemi.nl"
@@ -137,13 +138,13 @@ class HDFilmCehennemi : MainAPI() {
         }
     }
 
-    override suspend fun loadLinks(
+    override fun loadLinks(
         data: String,
         isCasting: Boolean,
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val document = app.get(data).document
+        val document = runBlocking { app.get(data).document }
 
         for (element in document.select("div.alternative-links")) {
             val langCode = element.attr("data-lang").uppercase()
@@ -154,14 +155,16 @@ class HDFilmCehennemi : MainAPI() {
                 if (videoID.isBlank()) continue
 
                 try {
-                    val res = app.get(
-                        "$mainUrl/video/$videoID/",
-                        headers = mapOf(
-                            "X-Requested-With" to "fetch",
-                            "Referer" to data,
-                            "User-Agent" to USER_AGENT
-                        )
-                    ).text
+                    val res = runBlocking {
+                        app.get(
+                            "$mainUrl/video/$videoID/",
+                            headers = mapOf(
+                                "X-Requested-With" to "fetch",
+                                "Referer" to data,
+                                "User-Agent" to USER_AGENT
+                            )
+                        ).text
+                    }
 
                     val cleanJson = res.replace("\\\"", "\"").replace("\\/", "/")
                     val iframeSrc = Regex("src=\"(https?://[^\"]+)\"").find(cleanJson)?.groupValues?.get(1)
@@ -175,24 +178,26 @@ class HDFilmCehennemi : MainAPI() {
                             finalIframe = "$mainUrl/playerr/$rapidId"
                         }
 
-                        loadExtractor(
-                            url = finalIframe,
-                            referer = "$mainUrl/",
-                            subtitleCallback = subtitleCallback,
-                            callback = { link ->
-                                val customLink = newExtractorLink(
-                                    sourceName,
-                                    sourceName,
-                                    link.url,
-                                    link.quality
-                                ) {
-                                    this.referer = link.referer
-                                    this.isM3u8 = link.isM3u8
-                                    this.headers = link.headers
+                        runBlocking {
+                            loadExtractor(
+                                url = finalIframe,
+                                referer = "$mainUrl/",
+                                subtitleCallback = subtitleCallback,
+                                callback = { link ->
+                                    val customLink = newExtractorLink(
+                                        source = sourceName,
+                                        name = sourceName,
+                                        url = link.url,
+                                        type = ExtractorLinkType.VIDEO,
+                                        quality = link.quality,
+                                        isM3u8 = link.isM3u8,
+                                        referer = link.referer,
+                                        headers = link.headers
+                                    )
+                                    callback.invoke(customLink)
                                 }
-                                callback.invoke(customLink)
-                            }
-                        )
+                            )
+                        }
                     }
                 } catch (e: Exception) {
                     Log.e("HDFilmCehennemi", "Link yükleme hatası: ${e.message}")

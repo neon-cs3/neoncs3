@@ -186,9 +186,10 @@ class HDFilmCehennemi : MainAPI() {
                                     url = link.url,
                                     referer = link.referer,
                                     quality = link.quality
-                                )
-                                customLink.isM3u8 = link.isM3u8
-                                customLink.headers = link.headers
+                                ) {
+                                    this.isM3u8 = link.isM3u8
+                                    this.headers = link.headers
+                                }
                                 callback.invoke(customLink)
                             }
                         )

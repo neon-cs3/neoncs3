@@ -180,9 +180,17 @@ class HDFilmCehennemi : MainAPI() {
                             referer = "$mainUrl/",
                             subtitleCallback = subtitleCallback,
                             callback = { link ->
-                                link.name = sourceName
-                                link.source = sourceName
-                                callback.invoke(link)
+                                @Suppress("DEPRECATION")
+                                val customLink = ExtractorLink(
+                                    source = sourceName,
+                                    name = sourceName,
+                                    url = link.url,
+                                    referer = link.referer,
+                                    quality = link.quality,
+                                    isM3u8 = link.isM3u8,
+                                    headers = link.headers
+                                )
+                                callback.invoke(customLink)
                             }
                         )
                     }

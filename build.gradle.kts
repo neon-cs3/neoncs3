@@ -51,7 +51,7 @@ subprojects {
     }
 
     android {
-        namespace = "com.neon-cs3"
+        namespace = "com.neon_cs3"
 
         defaultConfig {
             minSdk = 21

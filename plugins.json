@@ -1,0 +1,24 @@
+[
+    {
+        "iconUrl": "https://www.google.com/s2/favicons?domain=hdfilmcehennemi.com&sz=%size%",
+        "fileHash": "sha256-505ed84146258be750854b42aa6e6fa22b16d01ba2488e1f32b4d7b14ab68c0f",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/neoncs3/neoncs33",
+        "fileSize": 18128,
+        "status": 1,
+        "language": "tr",
+        "authors": [
+            "hexated",
+            "Kayracs3"
+        ],
+        "tvTypes": [
+            "Movie",
+            "TvSeries"
+        ],
+        "version": 20,
+        "internalName": "HDFilmCehennemi",
+        "description": "T\u00fcrkiye'nin en h\u0131zl\u0131 hd film izleme sitesi",
+        "url": "https://raw.githubusercontent.com/neoncs3/neoncs33/builds/HDFilmCehennemi.cs3",
+        "name": "HDFilmCehennemi"
+    }
+]

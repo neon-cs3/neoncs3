@@ -19,49 +19,155 @@ on:
 jobs:
   CloudStreamDerleyici:
     runs-on: ubuntu-latest
+
     steps:
+
+      # ============================================================
+      # Kaynak kod deposunu al
+      # ============================================================
       - name: "'src' Depo Kontrolü"
         uses: actions/checkout@v4.2.2
         with:
           path: "src"
 
+      # ============================================================
+      # builds branch'ini al
+      # ============================================================
       - name: "'build' Depo Kontrolü"
         uses: actions/checkout@v4.2.2
         with:
           ref: "builds"
           path: "builds"
 
+      # ============================================================
+      # Eski .cs3 dosyalarını temizle
+      # ============================================================
       - name: Eski Derlemeleri Temizle
-        run: rm $GITHUB_WORKSPACE/builds/*.cs3 || true
+        run: |
+          rm -f $GITHUB_WORKSPACE/builds/*.cs3
 
+      # ============================================================
+      # Java 17
+      # ============================================================
       - name: JDK 17 Ayarla
         uses: actions/setup-java@v4.6.0
         with:
           distribution: adopt
           java-version: 17
 
+      # ============================================================
+      # Android SDK
+      # ============================================================
       - name: Android SDK Ayarla
         uses: android-actions/setup-android@v3.2.2
         with:
           packages: "platforms;android-35 build-tools;35.0.0 platform-tools"
 
+      # ============================================================
+      # Eski / bozuk CloudStream Gradle cache temizliği
+      # ============================================================
       - name: Bozuk Gradle Önbelleğini Temizle
-        run: rm -rf ~/.gradle/caches/modules-2/files-2.1/com.github.recloudstream
+        run: |
+          rm -rf ~/.gradle/caches/modules-2/files-2.1/com.github.recloudstream
 
+      # ============================================================
+      # CloudStream eklentisini derle
+      # ============================================================
       - name: Eklentileri Derle
         run: |
           cd $GITHUB_WORKSPACE/src
+
           chmod +x gradlew
+
           ./gradlew make makePluginsJson
+
           shopt -s globstar
+
           cp **/build/*.cs3 $GITHUB_WORKSPACE/builds
+
           cp build/plugins.json $GITHUB_WORKSPACE/builds
 
+      # ============================================================
+      # Derleme ve SHA kontrolü
+      # ============================================================
+      - name: Derleme Kontrolü
+        run: |
+          echo "=========================================="
+          echo "BUILD DOSYALARI"
+          echo "=========================================="
+
+          cd $GITHUB_WORKSPACE/builds
+
+          ls -lah
+
+          echo ""
+          echo "=========================================="
+          echo "CS3 DOSYASI"
+          echo "=========================================="
+
+          ls -lh *.cs3
+
+          echo ""
+          echo "=========================================="
+          echo "CS3 SHA256"
+          echo "=========================================="
+
+          sha256sum *.cs3
+
+          echo ""
+          echo "=========================================="
+          echo "PLUGINS.JSON"
+          echo "=========================================="
+
+          cat plugins.json
+
+          echo ""
+          echo "=========================================="
+          echo "DOSYA BOYUTLARI"
+          echo "=========================================="
+
+          stat -c "%n -> %s bytes" *.cs3 plugins.json
+
+      # ============================================================
+      # builds branch'ine yükle
+      # ============================================================
       - name: Derlemeleri Yükle
         run: |
           cd $GITHUB_WORKSPACE/builds
+
           git config --local user.email "actions@github.com"
           git config --local user.name "GitHub Actions"
-          git add .
-          git commit --amend -m "$GITHUB_SHA 'nın Derlenmesi" || exit 0
-          git push --force
+
+          echo "=========================================="
+          echo "GIT DURUMU"
+          echo "=========================================="
+
+          git status
+
+          echo ""
+          echo "=========================================="
+          echo "DOSYALAR EKLENİYOR"
+          echo "=========================================="
+
+          git add -A
+
+          echo ""
+          echo "=========================================="
+          echo "GIT DEĞİŞİKLİKLERİ"
+          echo "=========================================="
+
+          git status
+
+          echo ""
+          echo "=========================================="
+          echo "COMMIT"
+          echo "=========================================="
+
+          git commit -m "CloudStream eklentilerini güncelle $GITHUB_SHA" || echo "Commit edilecek yeni değişiklik yok."
+
+          echo ""
+          echo "=========================================="
+          echo "PUSH"
+          echo "=========================================="
+
+          git push origin builds

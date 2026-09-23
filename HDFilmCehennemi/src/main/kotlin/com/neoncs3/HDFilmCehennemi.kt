@@ -14,8 +14,8 @@ class HDFilmCehennemi : MainAPI() {
     override var name                       = "HDFilmCehennemi"
     override val hasMainPage                = true
     override var lang                       = "tr"
-    override val hasQuickSearch             = true
-    override val supportedTypes             = setOf(TvType.Movie, TvType.TvSeries)
+    override val hasQuickSearch              = true
+    override val supportedTypes              = setOf(TvType.Movie, TvType.TvSeries)
 
     override val mainPage = mainPageOf(
         mainUrl to "Yeni Eklenen Filmler",
@@ -23,7 +23,7 @@ class HDFilmCehennemi : MainAPI() {
         "${mainUrl}/category/tavsiye-filmler-izle3"           to "Tavsiye Filmler",
         "${mainUrl}/imdb-7-puan-uzeri-filmle-2r"              to "IMDB 7+ Filmler",
         "${mainUrl}/en-cok-yorumlananlar-2"                   to "En Çok Yorumlananlar",
-        "${mainUrl}/en-cok-begenilen-filmleri-izle-4"          to "En Çok Beğenilenler",
+        "${mainUrl}/en-cok-begenilen-filmleri-izle-4"         to "En Çok Beğenilenler",
         "${mainUrl}/tur/aile-filmleri-izleyin-7"              to "Aile Filmleri",
         "${mainUrl}/tur/aksiyon-filmleri-izleyin-8"           to "Aksiyon Filmleri",
         "${mainUrl}/tur/animasyon-filmlerini-izleyin-5"       to "Animasyon Filmleri",
@@ -31,11 +31,7 @@ class HDFilmCehennemi : MainAPI() {
         "${mainUrl}/tur/bilim-kurgu-filmlerini-izleyin-5"     to "Bilim Kurgu Filmleri",
         "${mainUrl}/tur/komedi-filmlerini-izleyin-2"          to "Komedi Filmleri",
         "${mainUrl}/tur/korku-filmenini-izle-9/"              to "Korku Filmleri",
-        "${mainUrl}/tur/romantik-filmleri-izle-3"             to "Romantik Filmleri"
-    )
-
-    data class Results(
-        @JsonProperty("results") val results: List<String> = emptyList()
+        "${mainUrl}/tur/romantik-filmleri-izle-3"              to "Romantik Filmleri"
     )
 
     override suspend fun getMainPage(
@@ -320,131 +316,195 @@ class HDFilmCehennemi : MainAPI() {
         val document = app.get(data).document
 
         for (element in document.select("div.alternative-links")) {
-            val langCode = element.attr("data-lang").uppercase()
+
+            val langCode = element
+                .attr("data-lang")
+                .uppercase()
 
             for (button in element.select("button.alternative-link")) {
 
-                val sourceName =
-                    button.text()
-                        .replace(Regex("\\(.*?\\)"), "")
-                        .trim() + " [$langCode]"
+                val sourceName = button
+                    .text()
+                    .replace(
+                        Regex("\\(.*?\\)"),
+                        ""
+                    )
+                    .trim() + " [$langCode]"
 
                 val videoID = button.attr("data-video")
 
-                if (videoID.isBlank())
-                    continue
+                if (videoID.isBlank()) continue
 
                 try {
-                    val videoResponse = app.get(
+
+                    /*
+                     * Önce /video/{videoID}/ endpoint'inden iframe adresini alıyoruz.
+                     */
+                    val res = app.get(
                         "$mainUrl/video/$videoID/",
                         headers = mapOf(
                             "X-Requested-With" to "fetch",
                             "Referer" to data,
                             "User-Agent" to USER_AGENT
                         )
-                    )
+                    ).text
 
-                    val videoHtml = videoResponse.text
+                    val cleanJson = res
+                        .replace("\\\"", "\"")
+                        .replace("\\/", "/")
 
                     val iframeSrc =
                         Regex(
-                            """(?:src|data-src)=["'](https?://[^"']+)["']""",
-                            RegexOption.IGNORE_CASE
+                            """src="(https?://[^"]+)""""
                         )
-                            .find(videoHtml)
+                            .find(cleanJson)
                             ?.groupValues
                             ?.get(1)
-
-                    if (iframeSrc.isNullOrBlank()) {
-                        Log.e(
-                            "HDFilmCehennemi",
-                            "Iframe bulunamadı: $videoID"
-                        )
-                        continue
-                    }
-
-                    var iframeUrl = fixUrl(iframeSrc)
-
-                    if (iframeUrl.contains("rapidrame_id=")) {
-                        val rapidId =
-                            iframeUrl
-                                .substringAfter("rapidrame_id=")
-                                .substringBefore("&")
-
-                        iframeUrl = "$mainUrl/playerr/$rapidId"
-                    }
-
-                    val playerResponse = app.get(
-                        iframeUrl,
-                        headers = mapOf(
-                            "Referer" to "https://hdfilmcehennemi.mobi/",
-                            "Origin" to "https://hdfilmcehennemi.mobi",
-                            "User-Agent" to USER_AGENT
-                        )
-                    )
-
-                    val playerHtml = playerResponse.text
-
-                    var streamUrl =
-                        Regex(
-                            """"contentUrl"\s*:\s*"([^"]+)"""",
-                            RegexOption.IGNORE_CASE
-                        )
-                            .find(playerHtml)
-                            ?.groupValues
-                            ?.get(1)
-
-                    streamUrl = streamUrl
-                        ?.replace("\\/", "/")
-                        ?.replace("\\u0026", "&")
-                        ?.replace("&amp;", "&")
-
-                    if (streamUrl.isNullOrBlank()) {
-                        streamUrl =
-                            Regex(
-                                """https?://[^"'\s]+/master\.txt""",
-                                RegexOption.IGNORE_CASE
+                            ?: Regex(
+                                """data-src="(https?://[^"]+)""""
                             )
-                                .find(playerHtml)
-                                ?.value
-                    }
+                                .find(cleanJson)
+                                ?.groupValues
+                                ?.get(1)
+                            ?: cleanJson
+                                .substringAfter("iframe src=\"")
+                                .substringBefore("\"")
 
-                    if (streamUrl.isNullOrBlank()) {
+                    if (iframeSrc.isBlank()) {
                         Log.e(
                             "HDFilmCehennemi",
-                            "contentUrl/master.txt bulunamadı: $iframeUrl"
+                            "Iframe bulunamadı: $sourceName"
                         )
                         continue
+                    }
+
+                    var finalIframe = fixUrl(iframeSrc)
+
+                    /*
+                     * rapidrame_id kullanılıyorsa eski sistemdeki
+                     * /playerr/{id} dönüşümünü koruyoruz.
+                     */
+                    if (finalIframe.contains("rapidrame_id=")) {
+
+                        val rapidId = finalIframe
+                            .substringAfter("rapidrame_id=")
+                            .substringBefore("&")
+
+                        finalIframe = "$mainUrl/playerr/$rapidId"
                     }
 
                     Log.d(
                         "HDFilmCehennemi",
-                        "HLS URL: $streamUrl"
+                        "Player URL: $finalIframe"
                     )
 
-                    val streamHeaders = mapOf(
-                        "Origin" to "https://hdfilmcehennemi.mobi",
-                        "Referer" to "https://hdfilmcehennemi.mobi/",
-                        "User-Agent" to USER_AGENT
-                    )
+                    /*
+                     * Player/embed sayfasını çekiyoruz.
+                     *
+                     * Sayfanın JSON-LD VideoObject bölümünde:
+                     *
+                     * "contentUrl": "https://.../master.txt"
+                     *
+                     * şeklinde doğrudan HLS kaynağı bulunuyor.
+                     */
+                    val playerPage = app.get(
+                        finalIframe,
+                        headers = mapOf(
+                            "Referer" to "https://hdfilmcehennemi.mobi/",
+                            "User-Agent" to USER_AGENT
+                        )
+                    ).text
 
-                    callback.invoke(
-                        newExtractorLink(
-                            source = sourceName,
-                            name = sourceName,
-                            url = streamUrl,
-                            type = ExtractorLinkType.M3U8
-                        ) {
-                            this.referer = "https://hdfilmcehennemi.mobi/"
-                            this.quality = Qualities.Unknown.value
-                            this.headers = streamHeaders
-                        }
+                    /*
+                     * Öncelikle JSON-LD içindeki contentUrl'i bul.
+                     *
+                     * Örnek:
+                     *
+                     * "contentUrl": "https://hls8.playmix.uno/hls/.../master.txt"
+                     */
+                    var contentUrl = Regex(
+                        """"contentUrl"\s*:\s*"([^"]+)""""
                     )
+                        .find(playerPage)
+                        ?.groupValues
+                        ?.get(1)
+
+                    /*
+                     * Bazı durumlarda JSON escape karakterleri
+                     * bulunabilir.
+                     */
+                    contentUrl = contentUrl
+                        ?.replace("\\/", "/")
+                        ?.replace("\\u0026", "&")
+
+                    if (contentUrl.isNullOrBlank()) {
+
+                        /*
+                         * JSON-LD bulunamazsa alternatif olarak
+                         * master.txt URL'sini doğrudan arıyoruz.
+                         */
+                        contentUrl = Regex(
+                            """https?://[^"'\s]+/master\.txt"""
+                        )
+                            .find(playerPage)
+                            ?.value
+                    }
+
+                    if (!contentUrl.isNullOrBlank()) {
+
+                        val masterUrl = fixUrl(contentUrl)
+
+                        Log.d(
+                            "HDFilmCehennemi",
+                            "HLS Master URL: $masterUrl"
+                        )
+
+                        /*
+                         * ÖNEMLİ:
+                         *
+                         * URL'nin sonunda .txt olması bizi yanıltmasın.
+                         *
+                         * İçeriği:
+                         *
+                         * #EXTM3U
+                         * #EXTINF
+                         * ...
+                         *
+                         * olan bir HLS playlistidir.
+                         *
+                         * Bu yüzden CloudStream'e açıkça
+                         * ExtractorLinkType.M3U8 olarak bildiriyoruz.
+                         */
+                        callback.invoke(
+                            ExtractorLink(
+                                source = sourceName,
+                                name = sourceName,
+                                url = masterUrl,
+                                referer = "https://hdfilmcehennemi.mobi/",
+                                quality = Qualities.Unknown.value,
+                                type = ExtractorLinkType.M3U8,
+                                headers = mapOf(
+                                    "Origin" to "https://hdfilmcehennemi.mobi",
+                                    "Referer" to "https://hdfilmcehennemi.mobi/",
+                                    "User-Agent" to USER_AGENT
+                                )
+                            )
+                        )
+
+                    } else {
+
+                        Log.e(
+                            "HDFilmCehennemi",
+                            "contentUrl/master.txt bulunamadı: $finalIframe"
+                        )
+                    }
 
                 } catch (e: Exception) {
+
                     Log.e(
                         "HDFilmCehennemi",
-                        "Link yükleme hatası: ${e.message}"
+                        "Link yükleme hatası: ${e.message}",
+                        e
                     )
                 }
             }
@@ -453,3 +513,8 @@ class HDFilmCehennemi : MainAPI() {
         return true
     }
 }
+
+data class Results(
+    @JsonProperty("results")
+    val results: List<String> = arrayListOf()
+)

@@ -1,1106 +1,175 @@
-package com.neoncs3
-
-import android.util.Log
-import com.fasterxml.jackson.annotation.JsonProperty
-import com.lagradost.cloudstream3.*
-import com.lagradost.cloudstream3.utils.*
-import kotlinx.serialization.Serializable
-import org.jsoup.nodes.Element
-import java.net.URI
-
-class HDFilmCehennemi : MainAPI() {
-
-    override var mainUrl = "https://www.hdfilmcehennemi.nl"
-    override var name = "HDFilmCehennemi"
-
-    override val hasMainPage = true
-
-    override val supportedTypes = setOf(
-        TvType.Movie,
-        TvType.TvSeries
-    )
-
-    override var lang = "tr"
-
-    override val mainPage = mainPageOf(
-        "$mainUrl/film/" to "Yeni Filmler",
-        "$mainUrl/dizi/" to "Yeni Diziler",
-        "$mainUrl/animasyon/" to "Animasyon",
-        "$mainUrl/aksiyon/" to "Aksiyon",
-        "$mainUrl/macera/" to "Macera",
-        "$mainUrl/bilim-kurgu/" to "Bilim Kurgu",
-        "$mainUrl/komedi/" to "Komedi",
-        "$mainUrl/dram/" to "Dram",
-        "$mainUrl/korku/" to "Korku",
-        "$mainUrl/gerilim/" to "Gerilim"
-    )
-
-    // ============================================================
-    // AYARLAR
-    // ============================================================
-
-    private val userAgent =
-        "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 " +
-        "(KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
-
-    private fun log(message: String) {
-        Log.d("HDFilmCehennemi", message)
-    }
-
-    private fun error(message: String) {
-        Log.e("HDFilmCehennemi", message)
-    }
-
-    // ============================================================
-    // MAIN PAGE
-    // ============================================================
-
-    override suspend fun getMainPage(
-        page: Int,
-        request: MainPageRequest
-    ): HomePageResponse {
-
-        val url = if (page == 1) {
-            request.data
-        } else {
-            "${request.data}?page=$page"
-        }
-
-        log("MAIN PAGE: $url")
-
-        val response = app.get(
-            url,
-            headers = mapOf(
-                "User-Agent" to userAgent
-            )
-        )
-
-        if (!response.isSuccessful) {
-            error("MAIN PAGE HTTP: ${response.code}")
-            return newHomePageResponse(emptyList())
-        }
-
-        val document = response.document
-
-        val items = document.select(
-            "div.film, div.movie, div.card, article, .film-item"
-        )
-
-        val home = items.mapNotNull { element ->
-            parseMovieItem(element)
-        }
-
-        return newHomePageResponse(
-            HomePageList(
-                name = request.name,
-                list = home
-            ),
-            hasNext = items.isNotEmpty()
-        )
-    }
-
-    private fun parseMovieItem(element: Element): SearchResponse? {
-
-        val link = element.selectFirst("a[href]") ?: return null
-
-        val href = link.attr("href")
-            .let { fixUrl(it) }
+name: CloudStream Derleyici
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  workflow_dispatch:
 
-        if (href.isBlank()) return null
-
-        val title = (
-            element.selectFirst(
-                ".title, .film-title, .movie-title, h2, h3"
-            )?.text()
-                ?: link.attr("title")
-                ?: link.text()
-        ).trim()
-
-        if (title.isBlank()) return null
-
-        val poster = element.selectFirst("img")
-            ?.let {
-                it.attr("data-src")
-                    .ifBlank { it.attr("src") }
-            }
-            ?.let { fixUrl(it) }
-
-        return newMovieSearchResponse(
-            title,
-            href,
-            TvType.Movie
-        ) {
-            this.posterUrl = poster
-        }
-    }
-
-    // ============================================================
-    // SEARCH
-    // ============================================================
-
-    override suspend fun search(query: String): List<SearchResponse> {
-
-        log("SEARCH: $query")
-
-        val url =
-            "$mainUrl/search?q=${query.urlEncode()}"
-
-        val response = app.get(
-            url,
-            headers = mapOf(
-                "User-Agent" to userAgent,
-                "X-Requested-With" to "fetch",
-                "Referer" to "$mainUrl/"
-            )
-        )
-
-        log("SEARCH HTTP: ${response.code}")
-
-        if (!response.isSuccessful) {
-            return emptyList()
-        }
-
-        val document = response.document
-
-        val results = document.select(
-            "a[href]"
-        )
-
-        return results.mapNotNull { element ->
-
-            val href = element.attr("href")
-
-            if (!href.contains(mainUrl)) {
-                return@mapNotNull null
-            }
-
-            val title = element.text().trim()
-
-            if (title.isBlank()) {
-                return@mapNotNull null
-            }
-
-            val poster = element.selectFirst("img")
-                ?.let {
-                    it.attr("data-src")
-                        .ifBlank { it.attr("src") }
-                }
-                ?.let { fixUrl(it) }
-
-            newMovieSearchResponse(
-                title,
-                fixUrl(href),
-                TvType.Movie
-            ) {
-                posterUrl = poster
-            }
-        }.distinctBy {
-            it.url
-        }
-    }
-
-    // ============================================================
-    // LOAD
-    // ============================================================
-
-    override suspend fun load(url: String): LoadResponse? {
-
-        log("==========================================")
-        log("LOAD: $url")
-        log("==========================================")
-
-        val response = app.get(
-            url,
-            headers = mapOf(
-                "User-Agent" to userAgent
-            )
-        )
-
-        if (!response.isSuccessful) {
-            error("LOAD HTTP: ${response.code}")
-            return null
-        }
-
-        val document = response.document
-
-        val title = (
-            document.selectFirst("h1")?.text()
-                ?: document.selectFirst("title")?.text()
-                ?: ""
-        )
-            .trim()
-            .replace(" izle", "")
-            .replace(" izle - HDFilmCehennemi", "")
-            .trim()
-
-        if (title.isBlank()) {
-            error("TITLE BULUNAMADI")
-            return null
-        }
-
-        val poster = document.selectFirst(
-            "meta[property=og:image]"
-        )?.attr("content")
-            ?.let { fixUrl(it) }
-
-        val description = document.selectFirst(
-            "meta[property=og:description]"
-        )?.attr("content")
-            ?: document.selectFirst(
-                ".description, .film-description, .movie-description"
-            )?.text()
-
-        val year = document.selectFirst(
-            ".year, .film-year, .movie-year"
-        )?.text()
-            ?.filter { it.isDigit() }
-            ?.take(4)
-            ?.toIntOrNull()
-
-        val isSeries =
-            document.selectFirst("div.seasons") != null ||
-            document.selectFirst(".seasons") != null
-
-        // ========================================================
-        // DİZİ
-        // ========================================================
-
-        if (isSeries) {
-
-            val episodes = mutableListOf<Episode>()
-
-            document.select(
-                "div.seasons-tab-content a[href]"
-            ).forEach { element ->
-
-                val href = fixUrl(
-                    element.attr("href")
-                )
-
-                if (href.isBlank()) return@forEach
-
-                val text = element.text().trim()
-
-                val episodeNumber =
-                    Regex(
-                        """(?:Bölüm|Episode|Ep)\s*(\d+)""",
-                        RegexOption.IGNORE_CASE
-                    )
-                        .find(text)
-                        ?.groupValues
-                        ?.getOrNull(1)
-                        ?.toIntOrNull()
-
-                val seasonNumber =
-                    Regex(
-                        """(?:Sezon|Season)\s*(\d+)""",
-                        RegexOption.IGNORE_CASE
-                    )
-                        .find(text)
-                        ?.groupValues
-                        ?.getOrNull(1)
-                        ?.toIntOrNull()
-
-                episodes.add(
-                    newEpisode(href) {
-                        name = text
-                        season = seasonNumber ?: 1
-                        episode = episodeNumber ?: (episodes.size + 1)
-                    }
-                )
-            }
-
-            if (episodes.isNotEmpty()) {
-
-                return newTvSeriesLoadResponse(
-                    title,
-                    url,
-                    TvType.TvSeries,
-                    episodes
-                ) {
-                    posterUrl = poster
-                    plot = description
-                    this.year = year
-                }
-            }
-        }
-
-        // ========================================================
-        // FİLM
-        // ========================================================
-
-        return newMovieLoadResponse(
-            title,
-            url,
-            TvType.Movie,
-            url
-        ) {
-            posterUrl = poster
-            plot = description
-            this.year = year
-        }
-    }
-
-    // ============================================================
-    // LOAD LINKS
-    // ============================================================
-
-    override suspend fun loadLinks(
-        data: String,
-        isCasting: Boolean,
-        subtitleCallback: (SubtitleFile) -> Unit,
-        callback: (ExtractorLink) -> Unit
-    ): Boolean {
-
-        log("==========================================")
-        log("LOAD LINKS BAŞLADI")
-        log("DATA: $data")
-        log("==========================================")
-
-        var found = false
-
-        try {
-
-            // ====================================================
-            // 1 - FİLM / BÖLÜM SAYFASINI AÇ
-            // ====================================================
-
-            val pageResponse = app.get(
-                data,
-                headers = mapOf(
-                    "User-Agent" to userAgent,
-                    "Referer" to "$mainUrl/"
-                )
-            )
-
-            log("DATA PAGE HTTP CODE: ${pageResponse.code}")
-
-            if (!pageResponse.isSuccessful) {
-                error("DATA PAGE AÇILAMADI")
-                return false
-            }
-
-            val document = pageResponse.document
-
-            // ====================================================
-            // 2 - ALTERNATIVE LINKS
-            // ====================================================
-
-            val alternativeLinks =
-                document.select(
-                    "div.alternative-links button.alternative-link"
-                )
-
-            log(
-                "Alternative link sayısı: ${alternativeLinks.size}"
-            )
-
-            if (alternativeLinks.isEmpty()) {
-                error("ALTERNATIVE LINK BULUNAMADI")
-                return false
-            }
-
-            for (button in alternativeLinks) {
-
-                val sourceName =
-                    button.text()
-                        .trim()
-                        .ifBlank { "HDFilmCehennemi" }
-
-                val language =
-                    button.attr("data-language")
-                        .ifBlank {
-                            button.parent()?.text()
-                                ?: ""
-                        }
-                        .trim()
-
-                log("------------------------------------------")
-                log("SOURCE: $sourceName [$language]")
-
-                // =================================================
-                // 3 - VIDEO ID
-                // =================================================
-
-                val videoId =
-                    button.attr("data-video")
-                        .trim()
-
-                if (videoId.isBlank()) {
-                    error("VIDEO ID YOK")
-                    continue
-                }
-
-                val videoUrl =
-                    "$mainUrl/video/$videoId/"
-
-                log("VIDEO ID: $videoId")
-                log("VIDEO URL: $videoUrl")
-
-                // =================================================
-                // 4 - VIDEO ENDPOINT
-                // =================================================
-
-                val videoResponse = app.get(
-                    videoUrl,
-                    headers = mapOf(
-                        "User-Agent" to userAgent,
-                        "X-Requested-With" to "fetch",
-                        "Referer" to data,
-                        "Accept" to "*/*"
-                    )
-                )
-
-                log(
-                    "VIDEO RESPONSE CODE: ${videoResponse.code}"
-                )
-
-                val videoHtml = videoResponse.text
-
-                log(
-                    "VIDEO RESPONSE LENGTH: ${videoHtml.length}"
-                )
-
-                if (!videoResponse.isSuccessful) {
-                    error("VIDEO ENDPOINT HATA")
-                    continue
-                }
-
-                // =================================================
-                // 5 - IFRAME BUL
-                // =================================================
-
-                var iframeUrl: String? = null
-
-                val videoDocument =
-                    videoResponse.document
-
-                val iframe =
-                    videoDocument.selectFirst(
-                        "iframe[src], iframe[data-src]"
-                    )
-
-                if (iframe != null) {
-
-                    iframeUrl =
-                        iframe.attr("src")
-                            .ifBlank {
-                                iframe.attr("data-src")
-                            }
-
-                    log(
-                        "IFRAME BULUNDU: $iframeUrl"
-                    )
-                }
-
-                // -------------------------------------------------
-                // HTML içinde iframe yoksa regex
-                // -------------------------------------------------
-
-                if (iframeUrl.isNullOrBlank()) {
-
-                    iframeUrl = Regex(
-                        """(?:src|data-src)\s*=\s*["']([^"']+)["']""",
-                        RegexOption.IGNORE_CASE
-                    )
-                        .find(videoHtml)
-                        ?.groupValues
-                        ?.getOrNull(1)
-
-                    log(
-                        "REGEX IFRAME: $iframeUrl"
-                    )
-                }
-
-                if (iframeUrl.isNullOrBlank()) {
-
-                    error(
-                        "VIDEO SAYFASINDA IFRAME BULUNAMADI"
-                    )
-
-                    continue
-                }
-
-                var playerUrl =
-                    fixUrl(iframeUrl!!)
-
-                // =================================================
-                // 6 - RAPIDRAME ID
-                // =================================================
-
-                val rapidId =
-                    Regex(
-                        """rapidrame_id=([A-Za-z0-9_-]+)""",
-                        RegexOption.IGNORE_CASE
-                    )
-                        .find(videoHtml)
-                        ?.groupValues
-                        ?.getOrNull(1)
-
-                if (!rapidId.isNullOrBlank()) {
-
-                    playerUrl =
-                        "$mainUrl/playerr/$rapidId"
-
-                    log(
-                        "Rapidrame dönüştürüldü: $playerUrl"
-                    )
-                }
-
-                // =================================================
-                // 7 - RPLAYER
-                // =================================================
-
-                val rplayerMatch =
-                    Regex(
-                        """(?:rplayer|playerr)/([A-Za-z0-9_-]+)""",
-                        RegexOption.IGNORE_CASE
-                    )
-                        .find(videoHtml)
-
-                if (
-                    rplayerMatch != null &&
-                    rapidId.isNullOrBlank()
-                ) {
-
-                    val id =
-                        rplayerMatch.groupValues[1]
-
-                    playerUrl =
-                        "$mainUrl/rplayer/$id/"
-
-                    log(
-                        "RPlayer bulundu: $playerUrl"
-                    )
-                }
-
-                log("PLAYER URL: $playerUrl")
-
-                // =================================================
-                // 8 - PLAYER SAYFASI
-                // =================================================
-
-                val playerResponse = app.get(
-                    playerUrl,
-                    headers = mapOf(
-                        "User-Agent" to userAgent,
-                        "Referer" to data,
-                        "Accept" to "text/html,application/xhtml+xml"
-                    )
-                )
-
-                log(
-                    "PLAYER HTTP CODE: ${playerResponse.code}"
-                )
-
-                val playerHtml =
-                    playerResponse.text
-
-                log(
-                    "PLAYER LENGTH: ${playerHtml.length}"
-                )
-
-                if (!playerResponse.isSuccessful) {
-
-                    error(
-                        "PLAYER HTTP HATA: ${playerResponse.code}"
-                    )
-
-                    continue
-                }
-
-                // =================================================
-                // 9 - VIDEO URL ÇIKART
-                // =================================================
-
-                var hlsUrl =
-                    extractVideoUrl(playerHtml)
-
-                // =================================================
-                // 10 - master.txt ÖZEL ARAMA
-                // =================================================
-
-                if (hlsUrl.isNullOrBlank()) {
-
-                    hlsUrl =
-                        Regex(
-                            """https?://[^"'\\\s]+master\.txt[^"'\\\s]*""",
-                            RegexOption.IGNORE_CASE
-                        )
-                            .find(playerHtml)
-                            ?.value
-                }
-
-                // =================================================
-                // 11 - M3U8 ÖZEL ARAMA
-                // =================================================
-
-                if (hlsUrl.isNullOrBlank()) {
-
-                    hlsUrl =
-                        Regex(
-                            """https?://[^"'\\\s]+\.m3u8[^"'\\\s]*""",
-                            RegexOption.IGNORE_CASE
-                        )
-                            .find(playerHtml)
-                            ?.value
-                }
-
-                // =================================================
-                // 12 - RELATIVE M3U8
-                // =================================================
-
-                if (hlsUrl.isNullOrBlank()) {
-
-                    val relative =
-                        Regex(
-                            """["']([^"' ]+\.m3u8[^"']*)["']""",
-                            RegexOption.IGNORE_CASE
-                        )
-                            .find(playerHtml)
-                            ?.groupValues
-                            ?.getOrNull(1)
-
-                    if (!relative.isNullOrBlank()) {
-
-                        hlsUrl =
-                            try {
-
-                                URI(playerUrl)
-                                    .resolve(relative)
-                                    .toString()
-
-                            } catch (_: Exception) {
-
-                                null
-                            }
-                    }
-                }
-
-                // =================================================
-                // 13 - URL BULUNAMADI
-                // =================================================
-
-                if (hlsUrl.isNullOrBlank()) {
-
-                    error("HLS URL bulunamadı!")
-                    error("PLAYER: $playerUrl")
-
-                    // Debug amaçlı sadece ilgili satırları göster
-                    val debugLines =
-                        playerHtml
-                            .lineSequence()
-                            .filter {
-
-                                val s =
-                                    it.lowercase()
-
-                                s.contains("m3u8") ||
-                                s.contains("master") ||
-                                s.contains("playlist") ||
-                                s.contains("jwplayer") ||
-                                s.contains("file:") ||
-                                s.contains("source:") ||
-                                s.contains("video")
-                            }
-                            .take(100)
-                            .joinToString("\n")
-
-                    error(
-                        "PLAYER DEBUG:\n$debugLines"
-                    )
-
-                    continue
-                }
-
-                hlsUrl =
-                    cleanVideoUrl(hlsUrl)
-
-                log("==========================================")
-                log("HLS URL BULUNDU")
-                log(hlsUrl)
-                log("==========================================")
-
-                // =================================================
-                // 14 - HLS TEST
-                // =================================================
-
-                val hlsHeaders =
-                    mutableMapOf<String, String>()
-
-                hlsHeaders["User-Agent"] =
-                    userAgent
-
-                hlsHeaders["Referer"] =
-                    playerUrl
-
-                try {
-
-                    val origin =
-                        URI(playerUrl).let {
-                            "${it.scheme}://${it.host}"
-                        }
-
-                    hlsHeaders["Origin"] =
-                        origin
-
-                    log(
-                        "HLS ORIGIN: $origin"
-                    )
-
-                } catch (_: Exception) {
-                    // Origin üretilemezse devam et
-                }
-
-                val hlsResponse = try {
-
-                    app.get(
-                        hlsUrl,
-                        headers = hlsHeaders
-                    )
-
-                } catch (e: Exception) {
-
-                    error(
-                        "HLS REQUEST EXCEPTION: ${e.message}"
-                    )
-
-                    null
-                }
-
-                if (hlsResponse == null) {
-                    continue
-                }
-
-                log(
-                    "HLS HTTP CODE: ${hlsResponse.code}"
-                )
-
-                val contentType =
-                    hlsResponse.headers[
-                        "Content-Type"
-                    ] ?: ""
-
-                log(
-                    "HLS CONTENT TYPE: $contentType"
-                )
-
-                val hlsBody =
-                    hlsResponse.text
-
-                log(
-                    "HLS BODY: ${hlsBody.take(500)}"
-                )
-
-                // =================================================
-                // 15 - HLS 200
-                // =================================================
-
-                if (
-                    hlsResponse.isSuccessful &&
-                    (
-                        hlsBody.contains("#EXTM3U") ||
-                        contentType.contains(
-                            "mpegurl",
-                            ignoreCase = true
-                        ) ||
-                        hlsUrl.contains(
-                            ".m3u8",
-                            ignoreCase = true
-                        ) ||
-                        hlsUrl.contains(
-                            "master.txt",
-                            ignoreCase = true
-                        )
-                    )
-                ) {
-
-                    log(
-                        "HLS GEÇERLİ GÖRÜNÜYOR"
-                    )
-
-                    // =================================================
-                    // 16 - CLOUDSTREAM LINK
-                    // =================================================
-
-                    callback(
-                        newExtractorLink(
-                            sourceName,
-                            sourceName,
-                            hlsUrl,
-                            type = ExtractorLinkType.M3U8
-                        ) {
-
-                            this.referer =
-                                playerUrl
-
-                            this.headers =
-                                hlsHeaders
-                        }
-                    )
-
-                    found = true
-
-                    log(
-                        "CALLBACK ÇAĞRILDI"
-                    )
-
-                    log(
-                        "LINK BAŞARIYLA EKLENDİ"
-                    )
-
-                } else {
-
-                    error(
-                        "HLS GEÇERSİZ / ERİŞİLEMİYOR"
-                    )
-
-                    error(
-                        "CODE: ${hlsResponse.code}"
-                    )
-                }
-            }
-
-        } catch (e: Exception) {
-
-            error(
-                "LOAD LINKS EXCEPTION: ${e::class.java.simpleName}"
-            )
-
-            error(
-                e.message ?: "Bilinmeyen hata"
-            )
-
-            e.printStackTrace()
-        }
-
-        log("==========================================")
-        log("SONUÇ - Link bulundu: $found")
-        log("==========================================")
-
-        return found
-    }
-
-    // ============================================================
-    // VIDEO URL EXTRACTOR
-    // ============================================================
-
-    private fun extractVideoUrl(
-        html: String
-    ): String? {
-
-        /*
-         * HDFilmCehennemi player yapısı değişebileceği için
-         * birden fazla JS formatını deniyoruz.
-         */
-
-        val patterns =
-            listOf(
-
-                // JWPlayer:
-                // file: "https://....m3u8"
-                """file\s*:\s*["']([^"']+)["']""",
-
-                // file = "..."
-                """file\s*=\s*["']([^"']+)["']""",
-
-                // source: "..."
-                """source\s*:\s*["']([^"']+)["']""",
-
-                // source = "..."
-                """source\s*=\s*["']([^"']+)["']""",
-
-                // videoUrl
-                """videoUrl\s*[:=]\s*["']([^"']+)["']""",
-
-                // video_url
-                """video_url\s*[:=]\s*["']([^"']+)["']""",
-
-                // streamUrl
-                """streamUrl\s*[:=]\s*["']([^"']+)["']""",
-
-                // stream_url
-                """stream_url\s*[:=]\s*["']([^"']+)["']""",
-
-                // playlist
-                """playlist\s*[:=]\s*["']([^"']+)["']""",
-
-                // playlistUrl
-                """playlistUrl\s*[:=]\s*["']([^"']+)["']""",
-
-                // hlsUrl
-                """hlsUrl\s*[:=]\s*["']([^"']+)["']""",
-
-                // hls_url
-                """hls_url\s*[:=]\s*["']([^"']+)["']""",
-
-                // contentUrl
-                """"contentUrl"\s*:\s*"([^"]+)"""",
-
-                // content_url
-                """"content_url"\s*:\s*"([^"]+)"""",
-
-                // doğrudan m3u8
-                """["'](https?://[^"' ]+\.m3u8[^"']*)["']""",
-
-                // doğrudan master.txt
-                """["'](https?://[^"' ]+master\.txt[^"']*)["']""",
-
-                // escaped URL
-                """(https?:\\?/\\?/[^"' ]+\.(?:m3u8|mp4)[^"' ]*)"""
-            )
-
-        for (pattern in patterns) {
-
-            try {
-
-                val match =
-                    Regex(
-                        pattern,
-                        RegexOption.IGNORE_CASE
-                    ).find(html)
-
-                if (match != null) {
-
-                    val value =
-                        if (match.groupValues.size > 1) {
-                            match.groupValues[1]
-                        } else {
-                            match.value
-                        }
-
-                    val cleaned =
-                        cleanVideoUrl(value)
-
-                    if (
-                        cleaned.startsWith("http://") ||
-                        cleaned.startsWith("https://")
-                    ) {
-
-                        log(
-                            "VIDEO URL PATTERN MATCH: $pattern"
-                        )
-
-                        log(
-                            "VIDEO URL: $cleaned"
-                        )
-
-                        return cleaned
-                    }
-                }
-
-            } catch (e: Exception) {
-
-                error(
-                    "Regex hatası: ${e.message}"
-                )
-            }
-        }
-
-        // ========================================================
-        // HTML ENTITY / ESCAPED URL SON DENEME
-        // ========================================================
-
-        val candidates =
-            Regex(
-                """https?[^"'<> ]{10,}""",
-                RegexOption.IGNORE_CASE
-            )
-                .findAll(html)
-                .map {
-                    cleanVideoUrl(it.value)
-                }
-                .filter {
-                    it.contains(".m3u8") ||
-                    it.contains("master.txt")
-                }
-                .toList()
-
-        if (candidates.isNotEmpty()) {
-
-            log(
-                "SON URL ARAMASINDA BULUNDU: ${candidates.first()}"
-            )
-
-            return candidates.first()
-        }
-
-        return null
-    }
-
-    // ============================================================
-    // URL TEMİZLEME
-    // ============================================================
-
-    private fun cleanVideoUrl(
-        url: String
-    ): String {
-
-        return url
-            .replace("\\/", "/")
-            .replace("\\u0026", "&")
-            .replace("\\u003d", "=")
-            .replace("&amp;", "&")
-            .replace("&quot;", "\"")
-            .replace("\\\"", "\"")
-            .trim()
-            .trim('"')
-            .trim('\'')
-            .trim()
-    }
-
-    // ============================================================
-    // URL DÜZELT
-    // ============================================================
-
-    private fun fixUrl(
-        url: String
-    ): String {
-
-        if (url.isBlank()) return ""
-
-        return when {
-
-            url.startsWith("//") ->
-                "https:$url"
-
-            url.startsWith("/") ->
-                mainUrl + url
-
-            url.startsWith("http://") ||
-            url.startsWith("https://") ->
-                url
-
-            else ->
-                "$mainUrl/$url"
-        }
-    }
-
-    // ============================================================
-    // TRAILER
-    // ============================================================
-
-    private fun getTrailer(
-        document: org.jsoup.nodes.Document
-    ): String? {
-
-        val button =
-            document.selectFirst(
-                "div.post-info-trailer button"
-            ) ?: return null
-
-        return button.attr("data-trailer")
-            .ifBlank {
-                button.attr("data-video")
-            }
-            .ifBlank {
-                button.attr("data-src")
-            }
-            .ifBlank {
-                button.attr("data-url")
-            }
-            .takeIf {
-                !it.isNullOrBlank()
-            }
-    }
-}
+  push:
+    branches:
+      - master
+    paths-ignore:
+      - "**/*.md"
+      - "**/*.yml"
+      - "**/*.jpg"
+      - "**/*.png"
+      - "**/*.py"
+
+jobs:
+  CloudStreamDerleyici:
+    runs-on: ubuntu-latest
+
+    steps:
+
+      # ============================================================
+      # SOURCE REPOSITORY
+      # ============================================================
+
+      - name: "'src' Depo Kontrolü"
+        uses: actions/checkout@v4
+        with:
+          path: src
+          ref: master
+
+      # ============================================================
+      # BUILDS BRANCH
+      # ============================================================
+
+      - name: "'build' Depo Kontrolü"
+        uses: actions/checkout@v4
+        with:
+          path: builds
+          ref: builds
+
+      # ============================================================
+      # ESKİ CS3 DOSYALARINI TEMİZLE
+      # ============================================================
+
+      - name: Eski Derlemeleri Temizle
+        run: |
+          rm -f "$GITHUB_WORKSPACE"/builds/*.cs3
+
+      # ============================================================
+      # JAVA 17
+      # ============================================================
+
+      - name: JDK 17 Ayarla
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      # ============================================================
+      # ANDROID SDK
+      # ============================================================
+
+      - name: Android SDK Ayarla
+        uses: android-actions/setup-android@v3
+        with:
+          packages: "platforms;android-35 build-tools;35.0.0 platform-tools"
+
+      # ============================================================
+      # GRADLE CACHE TEMİZLE
+      # ============================================================
+
+      - name: Bozuk Gradle Önbelleğini Temizle
+        run: |
+          rm -rf ~/.gradle/caches/modules-2/files-2.1/com.github.recloudstream
+
+      # ============================================================
+      # EKLENTİLERİ DERLE
+      # ============================================================
+
+      - name: Eklentileri Derle
+        run: |
+          cd "$GITHUB_WORKSPACE/src"
+
+          chmod +x gradlew
+
+          ./gradlew make makePluginsJson
+
+          shopt -s globstar
+
+          cp **/build/*.cs3 "$GITHUB_WORKSPACE/builds/"
+
+          cp build/plugins.json "$GITHUB_WORKSPACE/builds/plugins.json"
+
+      # ============================================================
+      # SHA256 VE DOSYA BOYUTU KONTROLÜ
+      # ============================================================
+
+      - name: Derleme Kontrolü
+        run: |
+          cd "$GITHUB_WORKSPACE/builds"
+
+          echo ""
+          echo "=========================================="
+          echo "CS3 DOSYASI"
+          echo "=========================================="
+
+          ls -lh *.cs3
+
+          echo ""
+          echo "=========================================="
+          echo "GERÇEK SHA256"
+          echo "=========================================="
+
+          sha256sum HDFilmCehennemi.cs3
+
+          echo ""
+          echo "=========================================="
+          echo "PLUGINS.JSON"
+          echo "=========================================="
+
+          cat plugins.json
+
+          echo ""
+          echo "=========================================="
+          echo "DOSYA BOYUTLARI"
+          echo "=========================================="
+
+          stat -c "%n -> %s bytes" HDFilmCehennemi.cs3
+          stat -c "%n -> %s bytes" plugins.json
+
+      # ============================================================
+      # BUILDS BRANCH'E YÜKLE
+      # ============================================================
+
+      - name: Derlemeleri Yükle
+        run: |
+          cd "$GITHUB_WORKSPACE/builds"
+
+          git config --local user.email "actions@github.com"
+          git config --local user.name "GitHub Actions"
+
+          echo ""
+          echo "=========================================="
+          echo "GIT STATUS"
+          echo "=========================================="
+
+          git status
+
+          echo ""
+          echo "=========================================="
+          echo "DOSYALAR EKLENİYOR"
+          echo "=========================================="
+
+          git add -A
+
+          git status
+
+          echo ""
+          echo "=========================================="
+          echo "COMMIT"
+          echo "=========================================="
+
+          git commit -m "CloudStream eklentilerini güncelle $GITHUB_SHA" || echo "Yeni değişiklik yok."
+
+          echo ""
+          echo "=========================================="
+          echo "PUSH"
+          echo "=========================================="
+
+          git push origin builds

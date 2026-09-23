@@ -3,6 +3,6 @@
     "description": "Türkçe içerikli eklenti havuzu",
     "manifestVersion": 1,
     "pluginLists": [
-      "https://raw.githubusercontent.com/Kayracs3/Kayra/builds/plugins.json"
+      "https://raw.githubusercontent.com/neoncs3/neoncs33/builds/plugins.json"
     ]
 }

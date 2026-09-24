@@ -11,18 +11,7 @@ import org.jsoup.nodes.Element
 import java.net.URLEncoder
 import java.net.URI
 
-/**
- * DiziBOX provider for https://diziboxizle.com/
- *
- * Current site structure:
- * - Series: https://diziboxizle.com/{slug}/
- * - Episodes: https://diziboxizle.com/{slug}-{season}-sezon-{episode}-bolum/
- * - Movies: https://diziboxizle.com/film/{slug}/
- *
- * The video player can expose an iframe/provider page. Some episodes also expose
- * a direct HLS URL such as *.vmeas.cloud/.../*.m3u8. The HLS URL is discovered
- * dynamically so short-lived query tokens are not hard-coded.
- */
+
 class DiziBoxizle : MainAPI() {
 
     override var mainUrl = "https://diziboxizle.com"

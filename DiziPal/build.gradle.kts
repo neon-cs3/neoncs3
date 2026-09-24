@@ -2,7 +2,7 @@ version = 1
 
 cloudstream {
     description = "DiziPal Türkiye katalog ve bölüm sağlayıcısı"
-    authors = listOf("DiziPalCloudStream")
+    authors = listOf("neoncs3")
     status = 1
     tvTypes = listOf("TvSeries")
     language = "tr"

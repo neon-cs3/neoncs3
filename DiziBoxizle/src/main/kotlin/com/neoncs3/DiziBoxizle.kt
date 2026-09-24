@@ -182,9 +182,9 @@ class DiziBoxizle : MainAPI() {
         val rawHtml = buildString {
             append(document.html())
             document.select("script, noscript, template").forEach {
-                append('\n')
+                append("\n")
                 append(it.data())
-                append('\n')
+                append("\n")
                 append(it.html())
             }
         }.decodeEmbeddedText()
@@ -309,7 +309,7 @@ class DiziBoxizle : MainAPI() {
         return found
     }
 
-    private fun emitMediaLink(
+    private suspend fun emitMediaLink(
         mediaUrl: String,
         sourcePage: String,
         callback: (ExtractorLink) -> Unit,
@@ -374,16 +374,16 @@ class DiziBoxizle : MainAPI() {
         val providerHtml = buildString {
             append(providerDocument.html())
             providerDocument.select("script, noscript, template").forEach {
-                append('\\n')
+                append("\n")
                 append(it.data())
-                append('\\n')
+                append("\n")
                 append(it.html())
             }
         }.decodeEmbeddedText()
 
         var found = false
 
-        PROVIDER_SOURCE_PATTERN.findAll(providerHtml)
+        val providerSources = PROVIDER_SOURCE_PATTERN.findAll(providerHtml)
             .mapNotNull { it.groupValues.getOrNull(1)?.trim() }
             .map { it.decodeEmbeddedText() }
             .map { source ->
@@ -397,26 +397,32 @@ class DiziBoxizle : MainAPI() {
                 }
             }
             .filter { isMediaUrl(it) }
-            .forEach { mediaUrl ->
-                emitMediaLink(mediaUrl, providerUrl, callback)
-                found = true
-            }
+            .toList()
 
-        VMEAS_M3U8_PATTERN.findAll(providerHtml)
+        for (mediaUrl in providerSources) {
+            emitMediaLink(mediaUrl, providerUrl, callback)
+            found = true
+        }
+
+        val vmeasSources = VMEAS_M3U8_PATTERN.findAll(providerHtml)
             .map { it.value.trimEnd(')', ']', '}', ';', ',') }
-            .forEach { mediaUrl ->
-                emitMediaLink(mediaUrl, providerUrl, callback)
-                found = true
-            }
+            .toList()
 
-        Regex("https?://[^\\s\\\"'<>]+\\.(?:m3u8|mpd)(?:\\?[^\\s\\\"'<>]+)?", RegexOption.IGNORE_CASE)
+        for (mediaUrl in vmeasSources) {
+            emitMediaLink(mediaUrl, providerUrl, callback)
+            found = true
+        }
+
+        val genericMediaSources = Regex("https?://[^\\s\\\"'<>]+\\.(?:m3u8|mpd)(?:\\?[^\\s\\\"'<>]+)?", RegexOption.IGNORE_CASE)
             .findAll(providerHtml)
             .map { it.value.trimEnd(')', ']', '}', ';', ',') }
             .filterNot { it.contains("vmeas.cloud", ignoreCase = true) }
-            .forEach { mediaUrl ->
-                emitMediaLink(mediaUrl, providerUrl, callback)
-                found = true
-            }
+            .toList()
+
+        for (mediaUrl in genericMediaSources) {
+            emitMediaLink(mediaUrl, providerUrl, callback)
+            found = true
+        }
 
         providerDocument.select("track[src], track[data-src]").forEach { track ->
             val subtitle = track.attr("src").ifBlank { track.attr("data-src") }
@@ -562,9 +568,9 @@ class DiziBoxizle : MainAPI() {
             value == "mobil uygulama indir" ||
             value == "iletişim" ||
             value == "iletişim / reklam" ||
-            value.matches("[a-z]" ) ||
+            Regex("^[a-z]$").containsMatchIn(value) ||
             value == "#" ||
-            value.matches("(?:19|20)\\d{2}")
+            Regex("^(?:19|20)\\d{2}$").containsMatchIn(value)
         ) return true
 
         var current: Element? = this
@@ -746,7 +752,7 @@ class DiziBoxizle : MainAPI() {
             .ifBlank { element.attr("srcset") }
             .ifBlank { element.attr("src") }
 
-        val firstUrl = Regex("https?://[^\s,]+", RegexOption.IGNORE_CASE)
+        val firstUrl = Regex("https?://[^\\s,]+", RegexOption.IGNORE_CASE)
             .find(raw)
             ?.value
             ?.trimEnd(',')

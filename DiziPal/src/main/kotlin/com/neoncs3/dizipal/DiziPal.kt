@@ -168,9 +168,15 @@ class DiziPal : MainAPI() {
                     url = mediaUrl,
                     type = type,
                 ) {
-                    referer = mainUrl
+                    referer = data
                     quality = Qualities.Unknown.value
-                    headers = mapOf("User-Agent" to USER_AGENT)
+                    headers = mapOf(
+                        "User-Agent" to USER_AGENT,
+                        "Referer" to data,
+                        "Accept" to "*/*",
+                        "Accept-Language" to "tr-TR,tr;q=0.9,en;q=0.8",
+                        "Origin" to mainUrl.trimEnd('/')
+                    )
                 }
             )
         }

@@ -464,7 +464,7 @@ class DiziBoxizle : MainAPI() {
                     name = label
                     this.season = season
                     this.episode = episode
-                    posterUrl = posterFromElement(element) ?: guessedPoster(href)
+                    posterUrl = posterFromElement(element, href) ?: guessedPoster(href)
                 }
             }
             .distinctBy { it.data }
@@ -498,7 +498,7 @@ class DiziBoxizle : MainAPI() {
         }
         if (rawTitle.isBlank()) return null
 
-        val posterFromDom = posterFromElement(this)
+        val posterFromDom = posterFromElement(this, absolute)
         // Real DiziBOX content cards have a poster image in the same card/container.
         // Header alphabet entries and login/navigation links do not, so this prevents
         // those links from appearing as fake content cards.
@@ -598,14 +598,46 @@ class DiziBoxizle : MainAPI() {
         return false
     }
 
-    private fun posterFromElement(element: Element): String? {
-        var current: Element? = element
-        repeat(7) {
-            current?.selectFirst("img")?.let { image ->
-                posterOfElement(image)?.let { return it }
-            }
-            current = current?.parent()
+    private fun posterFromElement(element: Element, targetUrl: String? = null): String? {
+        // 1) Most DiziBOX cards put the poster directly inside the <a>.
+        element.selectFirst("img, picture img")?.let { image ->
+            posterOfElement(image)?.let { return it }
         }
+
+        val targetSlug = targetUrl
+            ?.let { runCatching { URI(it).path.trimEnd('/').substringAfterLast('/') }.getOrNull() }
+            ?.lowercase()
+            ?.replace(Regex("-(?:\\d+x\\d+|\\d+)$"), "")
+            .orEmpty()
+
+        // 2) Some layouts keep the title link and image in the same card container.
+        //    Only inspect a few nearby ancestors and never climb into header/nav/sidebar.
+        var current: Element? = element.parent()
+        var depth = 0
+        while (current != null && depth < 4) {
+            val tag = current.tagName().lowercase()
+            if (tag == "header" || tag == "nav" || tag == "footer" || tag == "aside") break
+
+            val marker = (current.id() + " " + current.classNames().joinToString(" ")).lowercase()
+            val looksLikeCard = Regex("\\b(card|item|post|entry|movie|film|series|dizi|content|thumbnail|list|archive)\\b")
+                .containsMatchIn(marker)
+
+            val images = current.select("img")
+            if (images.size == 1 || looksLikeCard) {
+                val preferred = images.firstOrNull { image ->
+                    val imageUrl = posterOfElement(image).orEmpty().lowercase()
+                    targetSlug.isNotBlank() && imageUrl.contains(targetSlug)
+                } ?: images.firstOrNull()
+
+                preferred?.let { image ->
+                    posterOfElement(image)?.let { return it }
+                }
+            }
+
+            current = current.parent()
+            depth++
+        }
+
         return null
     }
 

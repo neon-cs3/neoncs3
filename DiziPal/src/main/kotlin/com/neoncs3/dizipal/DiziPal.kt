@@ -128,30 +128,109 @@ class DiziPal : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit,
     ): Boolean {
-        val document = app.get(data, headers = requestHeaders).document
-
-        // Yalnızca sayfada zaten açıkça verilmiş doğrudan medya URL'lerini kullan.
-        // Şifreli/ciphertext alanlarını çözmez veya gizli player bağlantısı üretmez.
         val directUrls = LinkedHashSet<String>()
+        val subtitleUrls = LinkedHashSet<String>()
+        val mediaReferers = LinkedHashMap<String, String>()
 
-        document.select("video[src], source[src], [data-video], [data-src]").forEach { element ->
-            val raw = element.attr("src")
-                .ifBlank { element.attr("data-video") }
-                .ifBlank { element.attr("data-src") }
-            val fixed = raw.takeIf { it.isNotBlank() }?.let { fixUrl(it) }
-            if (fixed != null && isDirectMediaUrl(fixed)) directUrls.add(fixed)
+        // Önce bölüm sayfasını okuyup player iframe'ini bul.
+        // chrome://media-internals kaydında gerçek oynatma çerçevesi iframe.php?v=...
+        // olarak göründüğü için doğrudan bölüm URL'sini medya kaynağı olarak kullanmıyoruz.
+        val episodeDocument = try {
+            app.get(
+                data,
+                headers = requestHeaders,
+            ).document
+        } catch (_: Exception) {
+            return false
         }
 
-        Regex("(?i)(https?://[^\\s\\\"'<>]+\\.(?:m3u8|mpd|mp4)(?:\\?[^\\s\\\"'<>]*)?)")
-            .findAll(document.html().replace("\\/", "/"))
-            .map { it.groupValues[1] }
-            .forEach { directUrls.add(it) }
+        fun collectMedia(document: org.jsoup.nodes.Document, pageUrl: String) {
+            document.select("video[src], source[src], [data-video], [data-src], meta[property='og:video'], meta[itemprop='contentUrl']")
+                .forEach { element ->
+                    val raw = when {
+                        element.attr("src").isNotBlank() -> element.attr("src")
+                        element.attr("data-video").isNotBlank() -> element.attr("data-video")
+                        element.attr("data-src").isNotBlank() -> element.attr("data-src")
+                        else -> element.attr("content")
+                    }
+                    val fixed = raw.takeIf { it.isNotBlank() }?.let { fixUrl(it) }
+                    if (fixed != null && isDirectMediaUrl(fixed)) {
+                        directUrls.add(fixed)
+                        mediaReferers.putIfAbsent(fixed, pageUrl)
+                    }
+                }
 
-        document.select("track[kind='subtitles'], track[kind='captions'], track[src]").forEach { track ->
-            val src = track.attr("src").takeIf { it.isNotBlank() } ?: return@forEach
-            val url = fixUrl(src)
-            val lang = track.attr("srclang").ifBlank { track.attr("label") }.ifBlank { "Türkçe" }
-            subtitleCallback(newSubtitleFile(lang, url))
+            // Player sayfasında JS içine gömülmüş m3u8/mpd/mp4 adreslerini yakala.
+            val html = document.html().replace("\\/", "/")
+            Regex("""(?i)https?://[^\s\"'<>]+\.(?:m3u8|mpd|mp4)(?:\?[^\s\"'<>]*)?""")
+                .findAll(html)
+                .map { it.groupValues[0] }
+                .forEach {
+                    directUrls.add(it)
+                    mediaReferers.putIfAbsent(it, pageUrl)
+                }
+
+            document.select("track[kind='subtitles'], track[kind='captions'], track[src]")
+                .forEach { track ->
+                    val src = track.attr("src").takeIf { it.isNotBlank() } ?: return@forEach
+                    subtitleUrls.add(fixUrl(src))
+                }
+        }
+
+        // Bölüm sayfasının kendisi doğrudan medya veriyorsa bunu da kabul et.
+        collectMedia(episodeDocument, data)
+
+        if (directUrls.isEmpty()) {
+            val iframeUrls = LinkedHashSet<String>()
+
+            episodeDocument.select("iframe[src], iframe[data-src], [data-iframe], [data-player-url]")
+                .forEach { element ->
+                    val raw = element.attr("src")
+                        .ifBlank { element.attr("data-src") }
+                        .ifBlank { element.attr("data-iframe") }
+                        .ifBlank { element.attr("data-player-url") }
+                    val fixed = raw.takeIf { it.isNotBlank() }?.let { fixUrl(it) }
+                    if (fixed != null) iframeUrls.add(fixed)
+                }
+
+            // Kayıtlarda iframe adresi script içinde tutuluyorsa onu da yakala.
+            val pageHtml = episodeDocument.html().replace("\\/", "/")
+            Regex("""(?i)https?://[^\s\"'<>]+/iframe\.php\?[^\s\"'<>]+""")
+                .findAll(pageHtml)
+                .map { it.groupValues[0] }
+                .forEach { iframeUrls.add(it) }
+
+            for (iframeUrl in iframeUrls) {
+                val iframeOrigin = Regex("(?i)^https?://[^/]+")
+                    .find(iframeUrl)?.value
+                    ?: mainUrl.trimEnd('/')
+
+                val iframeDocument = try {
+                    app.get(
+                        iframeUrl,
+                        headers = mapOf(
+                            "User-Agent" to USER_AGENT,
+                            "Referer" to data,
+                            "Origin" to iframeOrigin,
+                            "Accept-Language" to "tr-TR,tr;q=0.9,en;q=0.8",
+                        ),
+                    ).document
+                } catch (_: Exception) {
+                    continue
+                }
+
+                collectMedia(iframeDocument, iframeUrl)
+
+                if (directUrls.isNotEmpty()) {
+                    // Hangi player iframe'ının medya verdiğini bulduğumuz anda dur.
+                    break
+                }
+            }
+        }
+
+        subtitleUrls.forEach { subtitleUrl ->
+            val lang = "Türkçe"
+            subtitleCallback(newSubtitleFile(lang, subtitleUrl))
         }
 
         directUrls.forEach { mediaUrl ->
@@ -161,6 +240,9 @@ class DiziPal : MainAPI() {
                 else -> ExtractorLinkType.VIDEO
             }
 
+            val mediaOrigin = Regex("(?i)^https?://[^/]+")
+                .find(mediaUrl)?.value
+
             callback(
                 newExtractorLink(
                     source = name,
@@ -168,15 +250,16 @@ class DiziPal : MainAPI() {
                     url = mediaUrl,
                     type = type,
                 ) {
-                    referer = data
+                    val mediaReferer = mediaReferers[mediaUrl] ?: data
+                    referer = mediaReferer
                     quality = Qualities.Unknown.value
-                    headers = mapOf(
-                        "User-Agent" to USER_AGENT,
-                        "Referer" to data,
-                        "Accept" to "*/*",
-                        "Accept-Language" to "tr-TR,tr;q=0.9,en;q=0.8",
-                        "Origin" to mainUrl.trimEnd('/')
-                    )
+                    headers = buildMap {
+                        put("User-Agent", USER_AGENT)
+                        put("Referer", mediaReferer)
+                        put("Accept", "*/*")
+                        put("Accept-Language", "tr-TR,tr;q=0.9,en;q=0.8")
+                        if (mediaOrigin != null) put("Origin", mediaOrigin)
+                    }
                 }
             )
         }

@@ -1,14 +1,14 @@
 [
     {
         "iconUrl": "https://www.google.com/s2/favicons?domain=www.fullhdfilmizlesene.de&sz=%size%",
-        "fileHash": "sha256-ebd3e4149e81c61410b3b0698f9d6ea3711e5f88e8be11308ca25a9c9d17fd07",
+        "fileHash": "sha256-4dd46a5c408b8d8dc28062a72c8c45c92e2c5510b1f6530db039bc82f9c8389f",
         "apiVersion": 1,
         "repositoryUrl": "https://github.com/neoncs3/neoncs33",
-        "fileSize": 29995,
+        "fileSize": 30020,
         "status": 1,
         "language": "tr",
         "authors": [
-            "Kayracs3"
+            "neoncs3"
         ],
         "tvTypes": [
             "Movie"

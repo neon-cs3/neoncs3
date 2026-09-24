@@ -51,10 +51,12 @@ class DiziBoxizle : MainAPI() {
             .mapNotNull { it.toSearchResponse() }
             .distinctBy { it.url }
 
+        val hasNext = results.isNotEmpty() && page < 50 && hasNextPage(document, page)
+
         return newHomePageResponse(
             request.name,
             results,
-            hasNext = results.isNotEmpty() && page < 50,
+            hasNext = hasNext,
         )
     }
 
@@ -155,7 +157,8 @@ class DiziBoxizle : MainAPI() {
 
         // 1) iframe/embed/provider links shown by DiziBOX.
         document.select(
-            "iframe[src], iframe[data-src], [data-iframe], [data-embed], [data-video], [data-player]"
+            "iframe[src], iframe[data-src], [data-iframe], [data-embed], [data-video], [data-player], " +
+                "[data-embed-url], [data-player-url], [data-video-url], [data-stream]"
         ).forEach { element ->
             extractUrlFromElement(element)?.let(candidates::add)
         }
@@ -180,7 +183,8 @@ class DiziBoxizle : MainAPI() {
 
         // 3) URLs embedded in attributes, scripts or JSON.
         document.select(
-            "[href], [src], [data-url], [data-href], [data-src], [data-link], [data-video], [data-iframe], [data-embed], [data-player], [onclick]"
+            "[href], [src], [data-url], [data-href], [data-src], [data-link], [data-video], [data-iframe], " +
+                "[data-embed], [data-player], [data-embed-url], [data-player-url], [data-video-url], [data-stream], [onclick]"
         ).forEach { element ->
             element.attributes().forEach { attr ->
                 val value = attr.value.trim().decodeEmbeddedText()
@@ -234,7 +238,6 @@ class DiziBoxizle : MainAPI() {
                             headers = mapOf(
                                 "User-Agent" to USER_AGENT,
                                 "Referer" to episodeUrl,
-                                "Origin" to mainUrl,
                                 "Accept" to "*/*",
                                 "Accept-Language" to "tr-TR,tr;q=0.9,en;q=0.8",
                             )
@@ -347,6 +350,10 @@ class DiziBoxizle : MainAPI() {
             "data-iframe",
             "data-embed",
             "data-player",
+            "data-embed-url",
+            "data-player-url",
+            "data-video-url",
+            "data-stream",
         )
 
         for (attribute in attrs) {
@@ -469,7 +476,21 @@ class DiziBoxizle : MainAPI() {
 
     private fun withPage(url: String, page: Int): String {
         if (page <= 1) return url
-        return if (url.contains("?")) "$url&page=$page" else "$url?page=$page"
+        return "${url.trimEnd('/')}/page/$page/"
+    }
+
+    private fun hasNextPage(document: Document, page: Int): Boolean {
+        val nextPage = page + 1
+        return document.select("a[href]").any { element ->
+            val href = fixUrlNull(element.attr("href")).orEmpty()
+            val label = element.text().trim().lowercase()
+
+            label.contains("sonraki") ||
+                label.contains("next") ||
+                label == "»" ||
+                href.endsWith("/page/$nextPage/") ||
+                href.contains("/page/$nextPage/?")
+        }
     }
 
     companion object {

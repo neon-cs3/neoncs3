@@ -1,4 +1,3 @@
-```kotlin
 package com.neoncs3
 
 import com.lagradost.cloudstream3.*

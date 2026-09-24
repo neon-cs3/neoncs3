@@ -2,11 +2,11 @@ version = 1
 
 cloudstream {
     description = "DiziPal Türkiye katalog ve bölüm sağlayıcısı"
-    authors = listOf("DiziPalCloudStream")
+    authors = listOf("DiziKorea")
     status = 1
     tvTypes = listOf("TvSeries")
     language = "tr"
-    iconUrl = "https://dizipal1583.com/favicon.ico"
+    iconUrl = "https://dizikorea3.com//favicon.ico"
 }
 
 android {

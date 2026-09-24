@@ -1,6 +1,7 @@
 package com.neoncs3.dizipal
 
 import com.lagradost.cloudstream3.*
+import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.ExtractorLinkType
 import com.lagradost.cloudstream3.utils.Qualities
 import com.lagradost.cloudstream3.utils.USER_AGENT
@@ -102,13 +103,12 @@ class DiziPal : MainAPI() {
                 val parsed = parseEpisodeLabel(label) ?: return@mapNotNull null
                 val season = parsed.second
                 val episode = parsed.third
-                Episode(
-                    data = href,
-                    name = parsed.first,
-                    season = season,
-                    episode = episode,
-                    posterUrl = anchor.selectFirst("img")?.posterUrl(),
-                )
+                newEpisode(href) {
+                    name = parsed.first
+                    this.season = season
+                    this.episode = episode
+                    posterUrl = anchor.selectFirst("img")?.posterUrl()
+                }
             }
             .distinctBy { it.data }
             .sortedWith(compareBy<Episode> { it.season ?: 0 }.thenBy { it.episode ?: 0 })
@@ -119,7 +119,7 @@ class DiziPal : MainAPI() {
             posterUrl = poster
             this.plot = plot
             this.year = year
-            rating?.let { this.rating = (it * 10).toInt() }
+            rating?.let { this.score = Score.from10(it) }
         }
     }
 
@@ -152,7 +152,7 @@ class DiziPal : MainAPI() {
             val src = track.attr("src").takeIf { it.isNotBlank() } ?: return@forEach
             val url = fixUrl(src)
             val lang = track.attr("srclang").ifBlank { track.attr("label") }.ifBlank { "Türkçe" }
-            subtitleCallback(SubtitleFile(lang, url))
+            subtitleCallback(newSubtitleFile(lang, url))
         }
 
         directUrls.forEach { mediaUrl ->

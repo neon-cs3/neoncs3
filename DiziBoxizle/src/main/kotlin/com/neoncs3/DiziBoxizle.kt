@@ -320,12 +320,14 @@ class DiziBoxizle : MainAPI() {
             else -> ExtractorLinkType.VIDEO
         }
 
-        val mediaReferer = when {
-            sourcePage.contains("vidmoly", ignoreCase = true) ||
-                sourcePage.contains("oynatloload.top", ignoreCase = true) ->
-                originOf(sourcePage)?.plus("/") ?: sourcePage
-            else -> sourcePage
-        }
+        val providerOrigin = originOf(sourcePage)
+        val isProviderPage = sourcePage.contains("vidmoly", ignoreCase = true) ||
+            sourcePage.contains("moly", ignoreCase = true) ||
+            sourcePage.contains("oynatloload.top", ignoreCase = true)
+
+        // Keep the FULL provider/embed URL as Referer. Some VMEAS endpoints reject
+        // a root-only Referer even though the provider origin is correct.
+        val mediaReferer = sourcePage
 
         val mediaHeaders = linkedMapOf(
             "User-Agent" to USER_AGENT,
@@ -333,7 +335,10 @@ class DiziBoxizle : MainAPI() {
             "Accept" to "*/*",
             "Accept-Language" to "tr-TR,tr;q=0.9,en;q=0.8",
         )
-        originOf(sourcePage)?.let { mediaHeaders["Origin"] = it }
+
+        if (isProviderPage && providerOrigin != null) {
+            mediaHeaders["Origin"] = providerOrigin
+        }
 
         callback(
             newExtractorLink(
@@ -708,6 +713,7 @@ class DiziBoxizle : MainAPI() {
     private fun isExternalPlayer(url: String): Boolean {
         val value = url.lowercase()
         return value.contains("vidmoly") ||
+            value.contains("moly") ||
             value.contains("ok.ru") ||
             value.contains("odnoklassniki") ||
             value.contains("doodstream") ||
@@ -752,9 +758,45 @@ class DiziBoxizle : MainAPI() {
     }
 
     private fun pageYear(document: Document): Int? {
-        val text = document.text()
-        return Regex("(?<!\\d)(?:19|20)\\d{2}(?!\\d)")
-            .find(text)?.value?.toIntOrNull()
+        val yearRegex = Regex("(?<!\\d)(?:19|20)\\d{2}(?!\\d)")
+
+        // First use fields that are normally the actual release/year label on the title card.
+        val visibleYearSelectors = listOf(
+            ".year", ".release-year", ".release_date", ".release-date",
+            ".meta .year", ".post-meta .year", ".movie-year", ".dizi-year",
+            "[itemprop='copyrightYear']", "[itemprop='releaseDate']"
+        )
+
+        for (selector in visibleYearSelectors) {
+            val value = document.select(selector).joinToString(" ") { element ->
+                element.text() + " " + element.attr("content")
+            }
+            yearRegex.find(value)?.value?.toIntOrNull()?.let { return it }
+        }
+
+        // Some cards put the year in the title/description rather than a dedicated field.
+        val focusedText = listOfNotNull(
+            document.selectFirst("h1")?.text(),
+            document.selectFirst("meta[property='og:title']")?.attr("content"),
+            document.selectFirst("meta[name='description']")?.attr("content"),
+            document.selectFirst("meta[property='og:description']")?.attr("content"),
+        ).joinToString(" ")
+
+        yearRegex.find(focusedText)?.value?.toIntOrNull()?.let { return it }
+
+        // Prefer releaseDate in JSON-LD. datePublished is deliberately not used because it
+        // is often the site's upload date rather than the series/movie release year.
+        for (script in document.select("script[type='application/ld+json']")) {
+            val json = script.data().ifBlank { script.html() }
+            val release = Regex(
+                """(?is)[\\\"']?releaseDate[\\\"']?\\s*:\\s*[\\\"']([^\\\"']+)"""
+            ).find(json)?.groupValues?.getOrNull(1)
+            yearRegex.find(release.orEmpty())?.value?.toIntOrNull()?.let { return it }
+        }
+
+        // Do not scan the entire document as a final fallback: that often returns the
+        // website footer/copyright year (for example 2026) instead of the title's year.
+        return null
     }
 
     private fun pageRating(document: Document): Double? {
@@ -842,17 +884,16 @@ class DiziBoxizle : MainAPI() {
     }
 
     companion object {
-        // VidMoly's classic embed page commonly exposes the stream as:
-        // sources: [{ file: "https://.../master.m3u8?..." }]
+        // Molly/VidMoly player pages can expose the stream under file/src/hls/url,
+        // with or without a sources array. Capture all of these forms.
         private val PROVIDER_SOURCE_PATTERN = Regex(
-            "(?is)\\bsources\\s*:\\s*\\[\\s*\\{\\s*[\"']?file[\"']?\\s*:\\s*[\"']([^\"']+)[\"']",
+            """(?is)[\"']?(?:file|src|hls|source|url)[\"']?\s*:\s*[\"']([^\"']+\.(?:m3u8|mpd)[^\"']*)[\"']"""
         )
 
         private val VMEAS_M3U8_PATTERN = Regex(
-            "https?://[a-z0-9.-]+\\.vmeas\\.cloud/[^\\s\\\"\'<>]+\\.m3u8(?:\\?[^\\s\\\"\'<>]+)?",
+            """https?://[a-z0-9.-]+\.vmeas\.cloud/[^\s\"'<>]+\.m3u8(?:\?[^\s\"'<>]+)?""",
             RegexOption.IGNORE_CASE,
         )
-
         // /the-lowdown-1-sezon-1-bolum/
         private val EPISODE_PATTERN = Regex(
             "(?i)-(\\d+)-sezon-(\\d+)-bolum(?:/|$)"

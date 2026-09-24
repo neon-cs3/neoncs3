@@ -1,23 +1,23 @@
 [
     {
-        "iconUrl": "https://dizipal1583.com/favicon.ico",
-        "fileHash": "sha256-59f957db48f674dddb68c0bf0e2f01fabf8f6a3136f83afb2f4ccf3fd1631c21",
+        "iconUrl": "https://diziasya.com/favicon.ico",
+        "fileHash": "sha256-af21434226f1aebf43d45b326fcc7fb5980449ad883d9c155f91931ccddcec24",
         "apiVersion": 1,
         "repositoryUrl": "https://github.com/neoncs3/neoncs33",
-        "fileSize": 18605,
+        "fileSize": 19248,
         "status": 1,
         "language": "tr",
         "authors": [
-            "neoncs3"
+            "DiziAsya"
         ],
         "tvTypes": [
             "TvSeries"
         ],
         "version": 1,
-        "internalName": "DiziPal",
+        "internalName": "DiziAsya",
         "description": "DiziPal T\u00fcrkiye katalog ve b\u00f6l\u00fcm sa\u011flay\u0131c\u0131s\u0131",
-        "url": "https://raw.githubusercontent.com/neoncs3/neoncs33/builds/DiziPal.cs3",
-        "name": "DiziPal"
+        "url": "https://raw.githubusercontent.com/neoncs3/neoncs33/builds/DiziAsya.cs3",
+        "name": "DiziAsya"
     },
     {
         "iconUrl": "https://www.google.com/s2/favicons?domain=www.fullhdfilmizlesene.de&sz=%size%",

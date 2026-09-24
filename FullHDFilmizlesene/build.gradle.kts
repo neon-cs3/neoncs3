@@ -1,7 +1,7 @@
 version = 4
 
 cloudstream {
-    authors     = listOf("Kayracs3")
+    authors     = listOf("neoncs3")
     language    = "tr"
     description = "Sinema zevkini evinize kadar getirdik. Türkiye'nin lider Film sitesinde, en yeni filmleri Full HD izleyin."
 

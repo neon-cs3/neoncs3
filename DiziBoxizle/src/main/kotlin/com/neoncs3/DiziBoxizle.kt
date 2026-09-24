@@ -204,15 +204,13 @@ class DiziBoxizle : MainAPI() {
             .filter { isMediaUrl(it) || isExternalPlayer(it) }
             .forEach(candidates::add)
 
-        // 5) Explicitly cover the vmeas.cloud format from the supplied player URL:
-        //    https://box-1579-p.vmeas.cloud/hls2/.../index-v1-a1.m3u8?...token...
-        Regex(
-            "https?://[a-z0-9.-]+\\.vmeas\\.cloud/[^\\s\\\"'<>]+(?:\\.m3u8)(?:\\?[^\\s\\\"'<>]+)?",
-            RegexOption.IGNORE_CASE,
-        ).findAll(rawHtml)
-            .map { it.value.trimEnd(')', ']', '}', ';', ',') }
+        // 5) VMEAS HLS URLs.
+        //    Handles both /index-v1-a1.m3u8?... and master.m3u8?... URLs,
+        //    including paths such as
+        //    /y8f7mscf5o6e_,n,l,.urlset/master.m3u8?...
+        VMEAS_M3U8_PATTERN.findAll(rawHtml)
+            .map { it.value.trimEnd(')', ']', '}', ';') }
             .forEach(candidates::add)
-
         var found = false
 
         for (candidate in candidates) {
@@ -393,8 +391,8 @@ class DiziBoxizle : MainAPI() {
     private fun isMediaUrl(url: String): Boolean {
         val value = url.lowercase()
         return Regex("(?i)\\.(m3u8|mpd|mp4|webm)(?:$|[?#])").containsMatchIn(value) ||
-            value.contains("/hls2/") && value.contains(".m3u8") ||
-            value.contains(".vmeas.cloud/") && value.contains(".m3u8")
+            (value.contains("/hls2/") && value.contains(".m3u8")) ||
+            (value.contains(".vmeas.cloud/") && value.contains(".m3u8"))
     }
 
     private fun String.decodeEmbeddedText(): String {
@@ -494,6 +492,11 @@ class DiziBoxizle : MainAPI() {
     }
 
     companion object {
+        private val VMEAS_M3U8_PATTERN = Regex(
+            "https?://[a-z0-9.-]+\\.vmeas\\.cloud/[^\\s\\\"\'<>]+\\.m3u8(?:\\?[^\\s\\\"\'<>]+)?",
+            RegexOption.IGNORE_CASE,
+        )
+
         // /the-lowdown-1-sezon-1-bolum/
         private val EPISODE_PATTERN = Regex(
             "(?i)-(\\d+)-sezon-(\\d+)-bolum(?:/|$)"

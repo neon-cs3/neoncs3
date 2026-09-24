@@ -1,5 +1,25 @@
 [
     {
+        "iconUrl": "https://dizipal1583.com/favicon.ico",
+        "fileHash": "sha256-50e295a0981c15f8a2c6bd35c7bdd59ab8681d10a6169086058a18f3c13f0730",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/neoncs3/neoncs33",
+        "fileSize": 15961,
+        "status": 1,
+        "language": "tr",
+        "authors": [
+            "neoncs3"
+        ],
+        "tvTypes": [
+            "TvSeries"
+        ],
+        "version": 1,
+        "internalName": "DiziPal",
+        "description": "DiziPal T\u00fcrkiye katalog ve b\u00f6l\u00fcm sa\u011flay\u0131c\u0131s\u0131",
+        "url": "https://raw.githubusercontent.com/neoncs3/neoncs33/builds/DiziPal.cs3",
+        "name": "DiziPal"
+    },
+    {
         "iconUrl": "https://www.google.com/s2/favicons?domain=www.fullhdfilmizlesene.de&sz=%size%",
         "fileHash": "sha256-4dd46a5c408b8d8dc28062a72c8c45c92e2c5510b1f6530db039bc82f9c8389f",
         "apiVersion": 1,

@@ -1,4 +1,4 @@
-package com.flitresyontarsus.dizipal
+package com.neoncs3.dizipal
 
 import android.content.Context
 import com.lagradost.cloudstream3.plugins.CloudstreamPlugin

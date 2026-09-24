@@ -169,8 +169,11 @@ class DiziKorea : MainAPI() {
             extractUrlFromElement(element)?.let(candidates::add)
         }
 
-        // 2) Provider buttons/anchors. The site currently exposes VIP, Vidmoly and Filemoon.
-        document.select("a[href], button, [role='button'], [data-url], [data-href], [data-src]")
+        // 2) Provider buttons/anchors.
+        // The site currently exposes VIP, Vidmoly and Filemoon.
+        document.select(
+            "a[href], button, [role='button'], [data-url], [data-href], [data-src]"
+        )
             .filter { element ->
                 val label = element.text().trim().lowercase()
                 label.contains("vidmoly") ||
@@ -183,10 +186,14 @@ class DiziKorea : MainAPI() {
             }
 
         // 3) Any obvious external player URLs embedded in attributes/script.
-        document.select("[href], [src], [data-url], [data-href], [data-src], [data-link], [data-video], [data-iframe], [data-embed], [data-player], [onclick]")
+        document.select(
+            "[href], [src], [data-url], [data-href], [data-src], [data-link], " +
+                "[data-video], [data-iframe], [data-embed], [data-player], [onclick]"
+        )
             .forEach { element ->
                 element.attributes().forEach { attr ->
                     val value = decodeEmbeddedText(attr.value.trim())
+
                     if (value.startsWith("http://") || value.startsWith("https://")) {
                         if (isExternalPlayer(value) || isMediaUrl(value)) {
                             candidates.add(value)
@@ -198,6 +205,7 @@ class DiziKorea : MainAPI() {
         val rawHtml = decodeEmbeddedText(
             buildString {
                 append(document.html())
+
                 document.select("script, noscript, template").forEach {
                     append('\n')
                     append(it.data())
@@ -213,7 +221,8 @@ class DiziKorea : MainAPI() {
             """(?i)https?://[a-z0-9.-]+\.vmbox\.space/hls/[^\s"'<>\\]+/master\.m3u8(?:\?[^\s"'<>]+)?"""
         )
             .findAll(rawHtml)
-            .map { it.value.trimEnd(')', ']', ';', ',', "\"") }
+            // trimEnd Char beklediği için burada '"' Char olarak kullanılıyor.
+            .map { it.value.trimEnd(')', ']', ';', ',', '"') }
             .forEach(candidates::add)
 
         // Genel medya/player URL taraması.
@@ -229,9 +238,14 @@ class DiziKorea : MainAPI() {
             when {
                 isMediaUrl(candidate) -> {
                     val type = when {
-                        Regex("(?i)\\.m3u8(?:$|\\?)").containsMatchIn(candidate) -> ExtractorLinkType.M3U8
-                        Regex("(?i)\\.mpd(?:$|\\?)").containsMatchIn(candidate) -> ExtractorLinkType.DASH
-                        else -> ExtractorLinkType.VIDEO
+                        Regex("(?i)\\.m3u8(?:$|\\?)").containsMatchIn(candidate) ->
+                            ExtractorLinkType.M3U8
+
+                        Regex("(?i)\\.mpd(?:$|\\?)").containsMatchIn(candidate) ->
+                            ExtractorLinkType.DASH
+
+                        else ->
+                            ExtractorLinkType.VIDEO
                     }
 
                     callback(
@@ -243,6 +257,7 @@ class DiziKorea : MainAPI() {
                         ) {
                             referer = data
                             quality = Qualities.Unknown.value
+
                             headers = mapOf(
                                 "User-Agent" to USER_AGENT,
                                 "Referer" to data,
@@ -252,6 +267,7 @@ class DiziKorea : MainAPI() {
                             )
                         }
                     )
+
                     found = true
                 }
 
@@ -265,6 +281,7 @@ class DiziKorea : MainAPI() {
                             callback,
                         )
                     }.getOrDefault(false)
+
                     found = ok || found
                 }
             }
@@ -273,6 +290,7 @@ class DiziKorea : MainAPI() {
         // 4) Public subtitle tracks only.
         document.select("track[src], track[data-src]").forEach { track ->
             val url = track.attr("src").ifBlank { track.attr("data-src") }
+
             if (url.isNotBlank()) {
                 subtitleCallback(
                     newSubtitleFile(
@@ -296,10 +314,15 @@ class DiziKorea : MainAPI() {
                     "(?i)/sezon-(\\d+)/bolum-(\\d+)"
                 ).find(absolute) ?: return@mapNotNull null
 
-                val season = match.groupValues[1].toIntOrNull() ?: return@mapNotNull null
-                val episode = match.groupValues[2].toIntOrNull() ?: return@mapNotNull null
+                val season = match.groupValues[1].toIntOrNull()
+                    ?: return@mapNotNull null
 
-                val label = element.text().trim().ifBlank { "$episode. Bölüm" }
+                val episode = match.groupValues[2].toIntOrNull()
+                    ?: return@mapNotNull null
+
+                val label = element.text().trim().ifBlank {
+                    "$episode. Bölüm"
+                }
 
                 newEpisode(absolute) {
                     name = label
@@ -322,10 +345,13 @@ class DiziKorea : MainAPI() {
         val absolute = fixUrlNull(href) ?: return null
         val path = absolute.lowercase()
 
-        if (path == mainUrl ||
+        if (
+            path == mainUrl ||
             absolute.contains("/sezon-", ignoreCase = true) ||
             absolute.contains("/bolum-", ignoreCase = true)
-        ) return null
+        ) {
+            return null
+        }
 
         val type = when {
             "/film/" in path -> TvType.Movie
@@ -336,16 +362,25 @@ class DiziKorea : MainAPI() {
         val title = text().trim().ifBlank {
             selectFirst("img")?.attr("alt")?.trim().orEmpty()
         }
+
         if (title.isBlank()) return null
 
         val poster = selectFirst("img")?.let(::posterOf)
 
         return when (type) {
-            TvType.Movie -> newMovieSearchResponse(title, absolute, TvType.Movie) {
+            TvType.Movie -> newMovieSearchResponse(
+                title,
+                absolute,
+                TvType.Movie
+            ) {
                 posterUrl = poster
             }
 
-            else -> newTvSeriesSearchResponse(title, absolute, TvType.TvSeries) {
+            else -> newTvSeriesSearchResponse(
+                title,
+                absolute,
+                TvType.TvSeries
+            ) {
                 posterUrl = poster
             }
         }
@@ -367,8 +402,15 @@ class DiziKorea : MainAPI() {
 
         for (attribute in attrs) {
             val value = element.attr(attribute).trim()
-            if (value.isNotBlank() &&
-                (value.startsWith("http://") || value.startsWith("https://") || value.startsWith("//") || value.startsWith("/"))
+
+            if (
+                value.isNotBlank() &&
+                (
+                    value.startsWith("http://") ||
+                        value.startsWith("https://") ||
+                        value.startsWith("//") ||
+                        value.startsWith("/")
+                    )
             ) {
                 return fixUrl(value)
             }
@@ -379,6 +421,7 @@ class DiziKorea : MainAPI() {
 
     private fun isExternalPlayer(url: String): Boolean {
         val value = url.lowercase()
+
         return value.contains("vidmoly") ||
             value.contains("filemoon") ||
             value.contains("vidmolyme") ||
@@ -395,9 +438,10 @@ class DiziKorea : MainAPI() {
 
     private fun isMediaUrl(url: String): Boolean {
         val value = url.lowercase()
+
         return Regex("(?i)\\.(m3u8|mpd|mp4)(?:$|[?#])").containsMatchIn(value) ||
             value.contains(".urlset/master.m3u8") ||
-            value.contains("/hls/") && value.contains("/master.m3u8")
+            (value.contains("/hls/") && value.contains("/master.m3u8"))
     }
 
     private fun decodeEmbeddedText(value: String): String {
@@ -417,7 +461,10 @@ class DiziKorea : MainAPI() {
     private fun hostLabel(url: String): String {
         return runCatching {
             java.net.URI(url).host
-        }.getOrNull()?.ifBlank { "DiziKorea" } ?: "DiziKorea"
+        }
+            .getOrNull()
+            ?.ifBlank { "DiziKorea" }
+            ?: "DiziKorea"
     }
 
     private fun posterOf(element: Element): String? {
@@ -425,11 +472,18 @@ class DiziKorea : MainAPI() {
             .ifBlank { element.attr("src") }
             .ifBlank { element.attr("data-lazy-src") }
 
-        return raw.takeIf { it.isNotBlank() }?.let(::fixUrl)
+        return raw
+            .takeIf { it.isNotBlank() }
+            ?.let(::fixUrl)
     }
 
     private fun withPage(url: String, page: Int): String {
         if (page <= 1) return url
-        return if (url.contains("?")) "$url&page=$page" else "$url?page=$page"
+
+        return if (url.contains("?")) {
+            "$url&page=$page"
+        } else {
+            "$url?page=$page"
+        }
     }
 }

@@ -47,9 +47,14 @@ class DiziBoxizle : MainAPI() {
             app.get(url, headers = requestHeaders).document
         }.getOrNull() ?: return newHomePageResponse(request.name, emptyList(), false)
 
+        val allowEpisodeItems = request.name.contains("bölüm", ignoreCase = true)
+
         val results = document.select("a[href]")
-            .mapNotNull { it.toSearchResponse() }
+            .asSequence()
+            .filterNot { it.isSiteChromeLink() }
+            .mapNotNull { it.toSearchResponse(allowEpisodeItems) }
             .distinctBy { it.url }
+            .toList()
 
         val hasNext = results.isNotEmpty() && page < 50 && hasNextPage(document, page)
 
@@ -77,9 +82,12 @@ class DiziBoxizle : MainAPI() {
             }.getOrNull() ?: continue
 
             val results = document.select("a[href]")
-                .mapNotNull { it.toSearchResponse() }
+                .asSequence()
+                .filterNot { it.isSiteChromeLink() }
+                .mapNotNull { it.toSearchResponse(false) }
                 .distinctBy { it.url }
                 .filterNot { isEpisodeUrl(it.url) }
+                .toList()
 
             if (results.isNotEmpty()) return results
         }
@@ -109,9 +117,37 @@ class DiziBoxizle : MainAPI() {
             }
         }
 
-        // Episode URLs are data passed to loadLinks(), not standalone search results.
+        // The site's "Son Bölümler" list links directly to episode pages.
+        // Expose such a page as a one-episode series so CloudStream can reach loadLinks().
         if (isEpisodeUrl(normalizedUrl)) {
-            return null
+            val episodeTitle = pageTitle(document) ?: return null
+            val match = EPISODE_PATTERN.find(normalizedUrl)
+                ?: ALT_EPISODE_PATTERN.find(normalizedUrl)
+            val season = match?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 1
+            val episode = match?.groupValues?.getOrNull(2)?.toIntOrNull() ?: 1
+            val seriesTitle = episodeTitle
+                .replace(Regex("(?i)\\s*\\d+\\.\\s*Sezon\\s*\\d+\\.\\s*Bölüm\\s*$"), "")
+                .trim()
+                .ifBlank { episodeTitle }
+
+            val singleEpisode = newEpisode(normalizedUrl) {
+                name = episodeTitle
+                this.season = season
+                this.episode = episode
+                posterUrl = posterOf(document)
+            }
+
+            return newTvSeriesLoadResponse(
+                seriesTitle,
+                normalizedUrl,
+                TvType.TvSeries,
+                listOf(singleEpisode),
+            ) {
+                posterUrl = posterOf(document)
+                plot = pagePlot(document)
+                year = pageYear(document)
+                pageRating(document)?.let { score = Score.from10(it) }
+            }
         }
 
         // DiziBOX series pages are root-level slugs, e.g. /the-lowdown/.
@@ -224,28 +260,26 @@ class DiziBoxizle : MainAPI() {
                         else -> ExtractorLinkType.VIDEO
                     }
 
-                    callback(
-                        newExtractorLink(
-                            source = name,
-                            name = hostLabel(clean),
-                            url = clean,
-                            type = type,
-                        ) {
-                            referer = episodeUrl
-                            quality = qualityFromUrl(clean)
-                            headers = mapOf(
-                                "User-Agent" to USER_AGENT,
-                                "Referer" to episodeUrl,
-                                "Accept" to "*/*",
-                                "Accept-Language" to "tr-TR,tr;q=0.9,en;q=0.8",
-                            )
-                        }
+                    emitMediaLink(
+                        clean,
+                        episodeUrl,
+                        callback,
                     )
                     found = true
                 }
 
                 isExternalPlayer(clean) -> {
-                    val ok = runCatching {
+                    // First inspect the provider page itself. VidMoly/Moly may hide the
+                    // real VMEAS master.m3u8 URL inside JavaScript instead of exposing it
+                    // as a normal HTML video element.
+                    val providerFound = extractProviderMedia(
+                        clean,
+                        episodeUrl,
+                        subtitleCallback,
+                        callback,
+                    )
+
+                    val extracted = runCatching {
                         loadExtractor(
                             clean,
                             episodeUrl,
@@ -253,7 +287,8 @@ class DiziBoxizle : MainAPI() {
                             callback,
                         )
                     }.getOrDefault(false)
-                    found = ok || found
+
+                    found = providerFound || extracted || found
                 }
             }
         }
@@ -274,6 +309,138 @@ class DiziBoxizle : MainAPI() {
         return found
     }
 
+    private fun emitMediaLink(
+        mediaUrl: String,
+        sourcePage: String,
+        callback: (ExtractorLink) -> Unit,
+    ) {
+        val type = when {
+            Regex("(?i)\\.(?:m3u8)(?:$|\\?)").containsMatchIn(mediaUrl) -> ExtractorLinkType.M3U8
+            Regex("(?i)\\.(?:mpd)(?:$|\\?)").containsMatchIn(mediaUrl) -> ExtractorLinkType.DASH
+            else -> ExtractorLinkType.VIDEO
+        }
+
+        val mediaReferer = when {
+            sourcePage.contains("vidmoly", ignoreCase = true) ||
+                sourcePage.contains("oynatloload.top", ignoreCase = true) ->
+                originOf(sourcePage)?.plus("/") ?: sourcePage
+            else -> sourcePage
+        }
+
+        val mediaHeaders = linkedMapOf(
+            "User-Agent" to USER_AGENT,
+            "Referer" to mediaReferer,
+            "Accept" to "*/*",
+            "Accept-Language" to "tr-TR,tr;q=0.9,en;q=0.8",
+        )
+        originOf(sourcePage)?.let { mediaHeaders["Origin"] = it }
+
+        callback(
+            newExtractorLink(
+                source = name,
+                name = hostLabel(mediaUrl),
+                url = mediaUrl,
+                type = type,
+            ) {
+                referer = mediaReferer
+                quality = qualityFromUrl(mediaUrl)
+                headers = mediaHeaders
+            }
+        )
+    }
+
+    private suspend fun extractProviderMedia(
+        providerUrl: String,
+        episodeUrl: String,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit,
+    ): Boolean {
+        val providerResponse = runCatching {
+            app.get(
+                providerUrl,
+                headers = mapOf(
+                    "User-Agent" to USER_AGENT,
+                    "Referer" to episodeUrl,
+                    "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    "Accept-Language" to "tr-TR,tr;q=0.9,en;q=0.8",
+                    "Sec-Fetch-Dest" to "iframe",
+                    "Sec-Fetch-Mode" to "navigate",
+                    "Sec-Fetch-Site" to "cross-site",
+                ),
+            )
+        }.getOrNull() ?: return false
+
+        val providerDocument = providerResponse.document
+        val providerHtml = buildString {
+            append(providerDocument.html())
+            providerDocument.select("script, noscript, template").forEach {
+                append('\\n')
+                append(it.data())
+                append('\\n')
+                append(it.html())
+            }
+        }.decodeEmbeddedText()
+
+        var found = false
+
+        PROVIDER_SOURCE_PATTERN.findAll(providerHtml)
+            .mapNotNull { it.groupValues.getOrNull(1)?.trim() }
+            .map { it.decodeEmbeddedText() }
+            .map { source ->
+                when {
+                    source.startsWith("//") -> "https:$source"
+                    source.startsWith("/") -> {
+                        val origin = originOf(providerUrl) ?: mainUrl
+                        "$origin${source}"
+                    }
+                    else -> source
+                }
+            }
+            .filter { isMediaUrl(it) }
+            .forEach { mediaUrl ->
+                emitMediaLink(mediaUrl, providerUrl, callback)
+                found = true
+            }
+
+        VMEAS_M3U8_PATTERN.findAll(providerHtml)
+            .map { it.value.trimEnd(')', ']', '}', ';', ',') }
+            .forEach { mediaUrl ->
+                emitMediaLink(mediaUrl, providerUrl, callback)
+                found = true
+            }
+
+        Regex("https?://[^\\s\\\"'<>]+\\.(?:m3u8|mpd)(?:\\?[^\\s\\\"'<>]+)?", RegexOption.IGNORE_CASE)
+            .findAll(providerHtml)
+            .map { it.value.trimEnd(')', ']', '}', ';', ',') }
+            .filterNot { it.contains("vmeas.cloud", ignoreCase = true) }
+            .forEach { mediaUrl ->
+                emitMediaLink(mediaUrl, providerUrl, callback)
+                found = true
+            }
+
+        providerDocument.select("track[src], track[data-src]").forEach { track ->
+            val subtitle = track.attr("src").ifBlank { track.attr("data-src") }
+            if (subtitle.isNotBlank()) {
+                subtitleCallback(
+                    newSubtitleFile(
+                        track.attr("label").ifBlank { "Türkçe" },
+                        fixUrl(subtitle),
+                    )
+                )
+            }
+        }
+
+        return found
+    }
+
+    private fun originOf(url: String): String? {
+        return runCatching {
+            val uri = URI(url)
+            if (uri.scheme.isNullOrBlank() || uri.host.isNullOrBlank()) return@runCatching null
+            "${uri.scheme}://${uri.host}"
+        }.getOrNull()
+    }
+
     private fun parseEpisodes(document: Document): List<Episode> {
         return document.select("a[href]")
             .mapNotNull { element ->
@@ -291,7 +458,7 @@ class DiziBoxizle : MainAPI() {
                     name = label
                     this.season = season
                     this.episode = episode
-                    posterUrl = element.selectFirst("img")?.let(::posterOfElement)
+                    posterUrl = posterFromElement(element) ?: guessedPoster(href)
                 }
             }
             .distinctBy { it.data }
@@ -301,7 +468,9 @@ class DiziBoxizle : MainAPI() {
             )
     }
 
-    private fun Element.toSearchResponse(): SearchResponse? {
+    private fun Element.toSearchResponse(allowEpisode: Boolean): SearchResponse? {
+        if (isSiteChromeLink()) return null
+
         val href = attr("href").trim()
         val absolute = fixUrlNull(href) ?: return null
         val path = absolute.lowercase()
@@ -314,26 +483,146 @@ class DiziBoxizle : MainAPI() {
             path.contains("/tag/") ||
             path.contains("/author/") ||
             path.contains("/page/") ||
-            isEpisodeUrl(absolute)
+            path.contains("/yil/") ||
+            path.contains("/sort/")
         ) return null
 
-        val title = text().trim().ifBlank {
+        val rawTitle = text().trim().ifBlank {
             selectFirst("img")?.attr("alt")?.trim().orEmpty()
         }
+        if (rawTitle.isBlank()) return null
+
+        val posterFromDom = posterFromElement(this)
+        // Real DiziBOX content cards have a poster image in the same card/container.
+        // Header alphabet entries and login/navigation links do not, so this prevents
+        // those links from appearing as fake content cards.
+        if (posterFromDom == null && !path.contains("/film/")) return null
+
+        val poster = posterFromDom ?: guessedPoster(absolute)
+        val title = cleanCardTitle(rawTitle)
         if (title.isBlank()) return null
 
-        val poster = selectFirst("img")?.let(::posterOfElement)
+        if (isEpisodeUrl(absolute)) {
+            if (!allowEpisode) return null
 
-        return if (path.contains("/film/")) {
-            newMovieSearchResponse(title, absolute, TvType.Movie) {
-                posterUrl = poster
+            val match = EPISODE_PATTERN.find(absolute)
+                ?: ALT_EPISODE_PATTERN.find(absolute)
+            val season = match?.groupValues?.getOrNull(1)?.toIntOrNull()
+            val episode = match?.groupValues?.getOrNull(2)?.toIntOrNull()
+            val episodeName = buildString {
+                append(title)
+                if (season != null && episode != null) {
+                    append(" - ")
+                    append(season)
+                    append(". Sezon ")
+                    append(episode)
+                    append(". Bölüm")
+                }
             }
-        } else {
-            // DiziBOX series pages are root-level slugs.
-            newTvSeriesSearchResponse(title, absolute, TvType.TvSeries) {
+
+            return newTvSeriesSearchResponse(episodeName, absolute, TvType.TvSeries) {
                 posterUrl = poster
             }
         }
+
+        if (path.contains("/film/")) {
+            return newMovieSearchResponse(title, absolute, TvType.Movie) {
+                posterUrl = poster
+            }
+        }
+
+        // DiziBOX series pages are root-level slugs.
+        return newTvSeriesSearchResponse(title, absolute, TvType.TvSeries) {
+            posterUrl = poster
+        }
+    }
+
+    private fun Element.isSiteChromeLink(): Boolean {
+        val value = text().trim().replace(Regex("\\s+"), " ").lowercase()
+
+        if (value == "dizibox" ||
+            value == "dizibox izle" ||
+            value == "üye ol" ||
+            value == "üye girişi" ||
+            value == "üye girişi yap" ||
+            value == "anasayfa" ||
+            value == "diziler" ||
+            value == "bölümler" ||
+            value == "filmler" ||
+            value == "sonraki »" ||
+            value == "son »" ||
+            value == "sonraki" ||
+            value == "en yeniler" ||
+            value == "en çok yorumlananlar" ||
+            value == "imdb puanı" ||
+            value == "tüm diziler" ||
+            value == "tüm filmler" ||
+            value == "dizi arşivi" ||
+            value == "mobil uygulam indir" ||
+            value == "mobil uygulama indir" ||
+            value == "iletişim" ||
+            value == "iletişim / reklam" ||
+            value.matches("[a-z]" ) ||
+            value == "#" ||
+            value.matches("(?:19|20)\\d{2}")
+        ) return true
+
+        var current: Element? = this
+        var depth = 0
+        while (current != null && depth < 8) {
+            val tag = current.tagName().lowercase()
+            if (tag == "header" || tag == "nav" || tag == "footer" || tag == "aside") {
+                return true
+            }
+
+            val marker = buildString {
+                append(current.id())
+                append(' ')
+                append(current.classNames().joinToString(" "))
+            }.lowercase()
+
+            if (Regex("\\b(site[-_]?header|site[-_]?footer|navbar|navigation|main[-_]?menu|mobile[-_]?menu|side[-_]?bar|sidebar|widget|login|register|alphabet|social|user[-_]?menu)\\b")
+                    .containsMatchIn(marker)
+            ) return true
+
+            current = current.parent()
+            depth++
+        }
+
+        return false
+    }
+
+    private fun posterFromElement(element: Element): String? {
+        var current: Element? = element
+        repeat(7) {
+            current?.selectFirst("img")?.let { image ->
+                posterOfElement(image)?.let { return it }
+            }
+            current = current?.parent()
+        }
+        return null
+    }
+
+    private fun cleanCardTitle(raw: String): String {
+        var title = raw.trim().replace(Regex("\\s+"), " ")
+        title = title.replace(
+            Regex("(?i)^IMDb\\s*[0-9]+(?:[.,][0-9]+)?(?:\\s*/\\s*10)?\\s*"),
+            "",
+        )
+        title = title.replace(Regex("\\s+(?:19|20)\\d{2}\\s*$"), "")
+        return title.trim()
+    }
+
+    private fun guessedPoster(url: String): String? {
+        val slug = runCatching {
+            URI(url).path.trimEnd('/').substringAfterLast('/')
+        }.getOrNull()?.takeIf { it.isNotBlank() } ?: return null
+
+        if (slug.contains("-sezon-") || slug.contains("-bolum")) {
+            return null
+        }
+
+        return "$mainUrl/wp-content/uploads/afisler/$slug-220x140.jpg"
     }
 
     private fun extractUrlFromElement(element: Element): String? {
@@ -385,7 +674,9 @@ class DiziBoxizle : MainAPI() {
             value.contains("odnoklassniki") ||
             value.contains("doodstream") ||
             value.contains("streamtape") ||
-            value.contains("filemoon")
+            value.contains("filemoon") ||
+            value.contains("oynatloload.top") ||
+            value.contains("vidmoly.biz")
     }
 
     private fun isMediaUrl(url: String): Boolean {
@@ -448,8 +739,29 @@ class DiziBoxizle : MainAPI() {
     private fun posterOfElement(element: Element): String? {
         val raw = element.attr("data-src")
             .ifBlank { element.attr("data-lazy-src") }
+            .ifBlank { element.attr("data-original") }
+            .ifBlank { element.attr("data-image") }
+            .ifBlank { element.attr("data-lazy-srcset") }
+            .ifBlank { element.attr("data-srcset") }
+            .ifBlank { element.attr("srcset") }
             .ifBlank { element.attr("src") }
-        return raw.takeIf { it.isNotBlank() }?.let(::fixUrl)
+
+        val firstUrl = Regex("https?://[^\s,]+", RegexOption.IGNORE_CASE)
+            .find(raw)
+            ?.value
+            ?.trimEnd(',')
+
+        val firstRelative = raw
+            .split(',')
+            .firstOrNull()
+            ?.trim()
+            ?.substringBefore(' ')
+            ?.takeIf { it.isNotBlank() }
+
+        return firstUrl
+            ?.takeIf { it.isNotBlank() }
+            ?.let(::fixUrl)
+            ?: firstRelative?.let(::fixUrl)
     }
 
     private fun hostLabel(url: String): String {
@@ -492,6 +804,12 @@ class DiziBoxizle : MainAPI() {
     }
 
     companion object {
+        // VidMoly's classic embed page commonly exposes the stream as:
+        // sources: [{ file: "https://.../master.m3u8?..." }]
+        private val PROVIDER_SOURCE_PATTERN = Regex(
+            "(?is)\\bsources\\s*:\\s*\\[\\s*\\{\\s*[\"']?file[\"']?\\s*:\\s*[\"']([^\"']+)[\"']",
+        )
+
         private val VMEAS_M3U8_PATTERN = Regex(
             "https?://[a-z0-9.-]+\\.vmeas\\.cloud/[^\\s\\\"\'<>]+\\.m3u8(?:\\?[^\\s\\\"\'<>]+)?",
             RegexOption.IGNORE_CASE,

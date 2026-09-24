@@ -1,4 +1,4 @@
-package com.flitresyontarsus.dizipal
+package com.neoncs3.dizipal
 
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.ExtractorLinkType

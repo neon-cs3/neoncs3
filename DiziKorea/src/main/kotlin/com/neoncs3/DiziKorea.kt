@@ -1,4 +1,4 @@
-package com.DiziAsya
+package com.neoncs3
 
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.ExtractorLink

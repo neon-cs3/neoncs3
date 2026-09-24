@@ -1,5 +1,25 @@
 [
     {
+        "iconUrl": "https://diziboxizle.com/favicon.ico",
+        "fileHash": "sha256-0ce0a2199204b5d05a86f1cad7d9844b99a52cee2f6a0c316e1ec8d059089f1d",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/neoncs3/neoncs33",
+        "fileSize": 22102,
+        "status": 1,
+        "language": "tr",
+        "authors": [
+            "DiziBoxizle"
+        ],
+        "tvTypes": [
+            "TvSeries"
+        ],
+        "version": 1,
+        "internalName": "DiziBoxizle",
+        "description": "DiziPal T\u00fcrkiye katalog ve b\u00f6l\u00fcm sa\u011flay\u0131c\u0131s\u0131",
+        "url": "https://raw.githubusercontent.com/neoncs3/neoncs33/builds/DiziBoxizle.cs3",
+        "name": "DiziBoxizle"
+    },
+    {
         "iconUrl": "https://dizikorea3.com//favicon.ico",
         "fileHash": "sha256-b909e92f915f6a0ebde1be45ee88a148775d2b9e19ee02a44ce46d99c3a23cea",
         "apiVersion": 1,

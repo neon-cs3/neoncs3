@@ -6,6 +6,7 @@ import com.lagradost.cloudstream3.utils.ExtractorLinkType
 import com.lagradost.cloudstream3.utils.Qualities
 import com.lagradost.cloudstream3.utils.loadExtractor
 import com.lagradost.cloudstream3.utils.newExtractorLink
+import com.lagradost.cloudstream3.utils.getAndUnpack
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import java.net.URLEncoder
@@ -325,9 +326,13 @@ class DiziBoxizle : MainAPI() {
             sourcePage.contains("moly", ignoreCase = true) ||
             sourcePage.contains("oynatloload.top", ignoreCase = true)
 
-        // Keep the FULL provider/embed URL as Referer. Some VMEAS endpoints reject
-        // a root-only Referer even though the provider origin is correct.
-        val mediaReferer = sourcePage
+        // media-internals shows playback inside the VidMoly frame.
+        // Use the provider origin as the HLS Referer/Origin instead of DiziBox.
+        val mediaReferer = if (isProviderPage) {
+            providerOrigin?.plus("/") ?: sourcePage
+        } else {
+            sourcePage
+        }
 
         val mediaHeaders = linkedMapOf(
             "User-Agent" to USER_AGENT,
@@ -360,88 +365,114 @@ class DiziBoxizle : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit,
     ): Boolean {
-        val providerResponse = runCatching {
-            app.get(
-                providerUrl,
-                headers = mapOf(
-                    "User-Agent" to USER_AGENT,
-                    "Referer" to episodeUrl,
-                    "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                    "Accept-Language" to "tr-TR,tr;q=0.9,en;q=0.8",
-                    "Sec-Fetch-Dest" to "iframe",
-                    "Sec-Fetch-Mode" to "navigate",
-                    "Sec-Fetch-Site" to "cross-site",
-                ),
-            )
-        }.getOrNull() ?: return false
-
-        val providerDocument = providerResponse.document
-        val providerHtml = buildString {
-            append(providerDocument.html())
-            providerDocument.select("script, noscript, template").forEach {
-                append("\n")
-                append(it.data())
-                append("\n")
-                append(it.html())
-            }
-        }.decodeEmbeddedText()
+        val providerCandidates = LinkedHashSet<String>()
+        providerCandidates.add(providerUrl)
+        vidMolyClassicUrl(providerUrl)?.let(providerCandidates::add)
 
         var found = false
 
-        val providerSources = PROVIDER_SOURCE_PATTERN.findAll(providerHtml)
-            .mapNotNull { it.groupValues.getOrNull(1)?.trim() }
-            .map { it.decodeEmbeddedText() }
-            .map { source ->
-                when {
-                    source.startsWith("//") -> "https:$source"
-                    source.startsWith("/") -> {
-                        val origin = originOf(providerUrl) ?: mainUrl
-                        "$origin${source}"
-                    }
-                    else -> source
+        for (pageUrl in providerCandidates) {
+            val providerResponse = runCatching {
+                app.get(
+                    pageUrl,
+                    headers = mapOf(
+                        "User-Agent" to USER_AGENT,
+                        "Referer" to episodeUrl,
+                        "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                        "Accept-Language" to "tr-TR,tr;q=0.9,en;q=0.8",
+                        "Sec-Fetch-Dest" to "iframe",
+                        "Sec-Fetch-Mode" to "navigate",
+                        "Sec-Fetch-Site" to "cross-site",
+                        "Sec-Fetch-User" to "?1",
+                    ),
+                )
+            }.getOrNull() ?: continue
+
+            val providerDocument = providerResponse.document
+            val providerHtml = buildString {
+                append(providerDocument.html())
+                providerDocument.select("script, noscript, template").forEach {
+                    append("\n")
+                    append(it.data())
+                    append("\n")
+                    append(it.html())
+                }
+            }.decodeEmbeddedText()
+
+            // Search both raw and unpacked JavaScript.
+            val unpackedHtml = runCatching { getAndUnpack(providerHtml) }
+                .getOrDefault(providerHtml)
+            val searchableHtml = if (unpackedHtml == providerHtml) {
+                providerHtml
+            } else {
+                providerHtml + "\n" + unpackedHtml
+            }
+
+            val sourceUrls = LinkedHashSet<String>()
+
+            PROVIDER_SOURCE_PATTERN.findAll(searchableHtml)
+                .mapNotNull { it.groupValues.getOrNull(1)?.trim() }
+                .map { it.decodeEmbeddedText() }
+                .forEach(sourceUrls::add)
+
+            PROVIDER_ANY_SOURCE_PATTERN.findAll(searchableHtml)
+                .mapNotNull { it.groupValues.getOrNull(1)?.trim() }
+                .map { it.decodeEmbeddedText() }
+                .forEach(sourceUrls::add)
+
+            VMEAS_M3U8_PATTERN.findAll(searchableHtml)
+                .map { it.value.trimEnd(')', ']', '}', ';', ',') }
+                .forEach(sourceUrls::add)
+
+            GENERIC_M3U8_PATTERN.findAll(searchableHtml)
+                .map { it.value.trimEnd(')', ']', '}', ';', ',') }
+                .forEach(sourceUrls::add)
+
+            for (rawSource in sourceUrls) {
+                val mediaUrl = normalizeProviderMediaUrl(rawSource, pageUrl)
+                if (!isMediaUrl(mediaUrl)) continue
+
+                emitMediaLink(mediaUrl, pageUrl, callback)
+                found = true
+            }
+
+            providerDocument.select("track[src], track[data-src]").forEach { track ->
+                val subtitle = track.attr("src").ifBlank { track.attr("data-src") }
+                if (subtitle.isNotBlank()) {
+                    subtitleCallback(
+                        newSubtitleFile(
+                            track.attr("label").ifBlank { "Türkçe" },
+                            fixUrl(subtitle),
+                        )
+                    )
                 }
             }
-            .filter { isMediaUrl(it) }
-            .toList()
 
-        for (mediaUrl in providerSources) {
-            emitMediaLink(mediaUrl, providerUrl, callback)
-            found = true
-        }
-
-        val vmeasSources = VMEAS_M3U8_PATTERN.findAll(providerHtml)
-            .map { it.value.trimEnd(')', ']', '}', ';', ',') }
-            .toList()
-
-        for (mediaUrl in vmeasSources) {
-            emitMediaLink(mediaUrl, providerUrl, callback)
-            found = true
-        }
-
-        val genericMediaSources = Regex("https?://[^\\s\\\"'<>]+\\.(?:m3u8|mpd)(?:\\?[^\\s\\\"'<>]+)?", RegexOption.IGNORE_CASE)
-            .findAll(providerHtml)
-            .map { it.value.trimEnd(')', ']', '}', ';', ',') }
-            .filterNot { it.contains("vmeas.cloud", ignoreCase = true) }
-            .toList()
-
-        for (mediaUrl in genericMediaSources) {
-            emitMediaLink(mediaUrl, providerUrl, callback)
-            found = true
-        }
-
-        providerDocument.select("track[src], track[data-src]").forEach { track ->
-            val subtitle = track.attr("src").ifBlank { track.attr("data-src") }
-            if (subtitle.isNotBlank()) {
-                subtitleCallback(
-                    newSubtitleFile(
-                        track.attr("label").ifBlank { "Türkçe" },
-                        fixUrl(subtitle),
-                    )
-                )
-            }
+            if (found) return true
         }
 
         return found
+    }
+
+    private fun normalizeProviderMediaUrl(raw: String, pageUrl: String): String {
+        val source = raw.trim()
+        return when {
+            source.startsWith("//") -> "https:$source"
+            source.startsWith("/") -> (originOf(pageUrl) ?: mainUrl) + source
+            source.startsWith("http://", ignoreCase = true) ||
+                source.startsWith("https://", ignoreCase = true) -> source
+            else -> source
+        }.replace("\\/", "/")
+    }
+
+    private fun vidMolyClassicUrl(url: String): String? {
+        val path = runCatching { URI(url).path }.getOrNull() ?: return null
+        val id = Regex("(?i)/v/([a-z0-9]+)$").find(path)?.groupValues?.getOrNull(1)
+            ?: Regex("(?i)/embed-([a-z0-9]+)\\.html$").find(path)?.groupValues?.getOrNull(1)
+            ?: return null
+
+        val origin = originOf(url) ?: "https://vidmoly.biz"
+        return "$origin/embed-$id.html"
     }
 
     private fun originOf(url: String): String? {
@@ -884,16 +915,27 @@ class DiziBoxizle : MainAPI() {
     }
 
     companion object {
-        // Molly/VidMoly player pages can expose the stream under file/src/hls/url,
-        // with or without a sources array. Capture all of these forms.
+        // VidMoly classic embeds commonly expose:
+        // sources: [{ file: "https://.../master.m3u8?..." }]
         private val PROVIDER_SOURCE_PATTERN = Regex(
-            """(?is)[\"']?(?:file|src|hls|source|url)[\"']?\s*:\s*[\"']([^\"']+\.(?:m3u8|mpd)[^\"']*)[\"']"""
+            "(?is)\\bsources\\s*:\\s*\\[\\s*\\{\\s*[\"']?file[\"']?[\\s:\=]*[\"']([^\"']+)[\"']"
+        )
+
+        // Fallback for variants using src/url/source/hls directly.
+        private val PROVIDER_ANY_SOURCE_PATTERN = Regex(
+            "(?is)\\b(?:file|src|url|source|hls)\\s*[:=]\\s*[\"'](https?://[^\"']+(?:m3u8|mpd)(?:\\?[^\"']+)?)['\"]"
         )
 
         private val VMEAS_M3U8_PATTERN = Regex(
-            """https?://[a-z0-9.-]+\.vmeas\.cloud/[^\s\"'<>]+\.m3u8(?:\?[^\s\"'<>]+)?""",
+            "https?://[a-z0-9.-]+\\.vmeas\\.cloud/[^\\s\"'<>]+?\\.m3u8(?:\\?[^\\s\"'<>]+)?",
             RegexOption.IGNORE_CASE,
         )
+
+        private val GENERIC_M3U8_PATTERN = Regex(
+            "https?://[^\\s\"'<>]+(?:master|index|playlist)[^\\s\"'<>]*\\.m3u8(?:\\?[^\\s\"'<>]+)?",
+            RegexOption.IGNORE_CASE,
+        )
+
         // /the-lowdown-1-sezon-1-bolum/
         private val EPISODE_PATTERN = Regex(
             "(?i)-(\\d+)-sezon-(\\d+)-bolum(?:/|$)"
